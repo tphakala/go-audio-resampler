@@ -289,7 +289,7 @@ Filter complexity comparison for 44.1kHz → 48kHz conversion:
 | High     | 166 taps × 2 phase | 64 taps × 80 phase  | ~5452      |
 | VeryHigh | 166 taps × 2 phase | 100 taps × 80 phase | ~8332      |
 
-_Actual performance varies by CPU and SIMD support. Enable AVX2 with `GOAMD64=v3` for best performance._
+_Actual performance varies by CPU. The [simd](https://github.com/tphakala/simd) library automatically uses AVX2/SSE when available. Setting `GOAMD64=v3` can provide minor additional speedup for non-SIMD code paths._
 
 ## Dependencies
 
