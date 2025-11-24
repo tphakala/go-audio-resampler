@@ -61,38 +61,57 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 	}
 
 	// Determine architecture based on ratio
-	if isIntegerRatio(ratio) {
-		// Integer ratio: single DFT stage
-		intRatio := int(math.Round(ratio))
-		dftStage, err := NewDFTStage[F](intRatio, quality)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create DFT stage: %w", err)
+	// Key insight: DFT pre-stage (upsampling) only makes sense for UPSAMPLING.
+	// For downsampling, we should NOT upsample first - go directly to polyphase.
+	if ratio >= 1.0 {
+		// UPSAMPLING (ratio >= 1.0)
+		if isIntegerRatio(ratio) {
+			// Integer ratio: single DFT stage
+			intRatio := int(math.Round(ratio))
+			dftStage, err := NewDFTStage[F](intRatio, quality)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create DFT stage: %w", err)
+			}
+			r.preStage = dftStage
+			// No polyphase stage needed
+		} else {
+			// Non-integer upsampling: DFT pre-stage + polyphase stage
+			// Pre-upsample by 2× to get better working ratio for polyphase
+			preUpsampleFactor := 2
+			intermediateRate := inputRate * float64(preUpsampleFactor)
+
+			// Create DFT pre-stage (2× upsampling)
+			dftStage, err := NewDFTStage[F](preUpsampleFactor, quality)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create DFT pre-stage: %w", err)
+			}
+			r.preStage = dftStage
+
+			// Create polyphase stage for remaining ratio
+			// Polyphase operates on pre-upsampled signal
+			polyphaseRatio := outputRate / intermediateRate
+			// Pass total io_ratio for correct Fp1 calculation (soxr uses total ratio)
+			totalIORatio := inputRate / outputRate
+			polyStage, err := NewPolyphaseStage[F](polyphaseRatio, totalIORatio, quality)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create polyphase stage: %w", err)
+			}
+			r.polyphaseStage = polyStage
 		}
-		r.preStage = dftStage
-		// No polyphase stage needed
 	} else {
-		// Non-integer ratio: DFT pre-stage + polyphase stage
-		// Pre-upsample by 2× to get better working ratio for polyphase
-		preUpsampleFactor := 2
-		intermediateRate := inputRate * float64(preUpsampleFactor)
-
-		// Create DFT pre-stage (2× upsampling)
-		dftStage, err := NewDFTStage[F](preUpsampleFactor, quality)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create DFT pre-stage: %w", err)
-		}
-		r.preStage = dftStage
-
-		// Create polyphase stage for remaining ratio
-		// Polyphase operates on pre-upsampled signal
-		polyphaseRatio := outputRate / intermediateRate
-		// Pass total io_ratio for correct Fp1 calculation (soxr uses total ratio)
+		// DOWNSAMPLING (ratio < 1.0)
+		// For downsampling, we use polyphase directly without DFT pre-stage.
+		// This is correct because:
+		// 1. DFT upsampling before polyphase downsampling is wasteful
+		// 2. The polyphase filter can handle anti-aliasing directly
+		// 3. soxr also uses this approach for downsampling
 		totalIORatio := inputRate / outputRate
-		polyStage, err := NewPolyphaseStage[F](polyphaseRatio, totalIORatio, quality)
+		polyStage, err := NewPolyphaseStage[F](ratio, totalIORatio, quality)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create polyphase stage: %w", err)
 		}
 		r.polyphaseStage = polyStage
+		// No DFT pre-stage for downsampling
 	}
 
 	return r, nil
@@ -198,24 +217,68 @@ func isIntegerRatio(ratio float64) bool {
 }
 
 // Quality levels for resampling.
+// These match soxr's quality presets for compatibility.
 type Quality int
 
 const (
-	QualityLow    Quality = iota // Faster, lower quality
-	QualityMedium                // Balanced
-	QualityHigh                  // soxr-equivalent quality
+	// QualityQuick provides quick cubic interpolation (8-bit equivalent).
+	// Standard quality presets (matching soxr).
+	QualityQuick Quality = iota
+	// QualityLow provides low quality 16-bit resampling.
+	QualityLow
+	// QualityMedium provides medium quality 16-bit resampling.
+	QualityMedium
+	// QualityHigh provides high quality 20-bit resampling (soxr default).
+	QualityHigh
+	// QualityVeryHigh provides very high quality 28-bit resampling.
+	QualityVeryHigh
+
+	// Quality16Bit provides 16-bit precision for fine control.
+	Quality16Bit
+	// Quality20Bit provides 20-bit precision for fine control.
+	Quality20Bit
+	// Quality24Bit provides 24-bit precision for fine control.
+	Quality24Bit
+	// Quality28Bit provides 28-bit precision for fine control.
+	Quality28Bit
+	// Quality32Bit provides 32-bit precision for fine control.
+	Quality32Bit
 )
 
 // Filter design constants.
 const (
-	// Stopband attenuation in dB for each quality level.
-	attenuationLow    = 100.0 // QualityLow
-	attenuationMedium = 140.0 // QualityMedium
-	attenuationHigh   = 180.0 // QualityHigh (matches soxr)
+	// Stopband attenuation calculation: att = (bits + 1) * 6.02 dB
+	// This matches soxr's formula: att = (bits1 + 1) * linear_to_dB(2.)
+	dbPerBit = 6.0206 // 20 * log10(2) ≈ 6.02 dB per bit
+
+	// Quality preset bit precisions (matching soxr)
+	bitsQuick    = 8  // Quick quality
+	bitsLow      = 16 // Low quality
+	bitsMedium   = 16 // Medium quality (same bits, different transition)
+	bitsHigh     = 20 // High quality (SOXR_HQ)
+	bitsVeryHigh = 28 // Very high quality (SOXR_VHQ)
+
+	// Explicit bit precision constants for Quality*Bit presets
+	bits16Bit = 16 // 16-bit precision preset
+	bits20Bit = 20 // 20-bit precision preset
+	bits24Bit = 24 // 24-bit precision preset
+	bits28Bit = 28 // 28-bit precision preset
+	bits32Bit = 32 // 32-bit precision preset
+
+	// Attenuation values derived from bit precision: (bits + 1) * 6.02 dB
+	attenuationQuick    = (bitsQuick + 1) * dbPerBit    // ~54 dB
+	attenuationLow      = (bitsLow + 1) * dbPerBit      // ~102 dB
+	attenuationMedium   = (bitsMedium + 1) * dbPerBit   // ~102 dB
+	attenuationHigh     = (bitsHigh + 1) * dbPerBit     // ~126 dB
+	attenuationVeryHigh = (bitsVeryHigh + 1) * dbPerBit // ~175 dB
 
 	// Filter cutoff frequency constants.
 	nyquistFraction    = 0.5  // Half the sample rate (Nyquist)
 	transitionBWFactor = 0.05 // Transition bandwidth relative to Nyquist
+
+	// Polyphase filter design constants.
+	downsamplingTransitionScale = 0.15 // Transition band scale factor for downsampling
+	transitionBandwidthHalf     = 0.5  // Half factor for transition bandwidth calculation
 
 	// Buffer sizing constants.
 	historyBufferMultiplier = 2 // Extra capacity for history buffers
@@ -262,14 +325,28 @@ const (
 // qualityToAttenuation returns stopband attenuation for quality level.
 func qualityToAttenuation(q Quality) float64 {
 	switch q {
+	case QualityQuick:
+		return attenuationQuick
 	case QualityLow:
 		return attenuationLow
 	case QualityMedium:
 		return attenuationMedium
 	case QualityHigh:
 		return attenuationHigh
+	case QualityVeryHigh:
+		return attenuationVeryHigh
+	case Quality16Bit:
+		return (bits16Bit + 1) * dbPerBit
+	case Quality20Bit:
+		return (bits20Bit + 1) * dbPerBit
+	case Quality24Bit:
+		return (bits24Bit + 1) * dbPerBit
+	case Quality28Bit:
+		return (bits28Bit + 1) * dbPerBit
+	case Quality32Bit:
+		return (bits32Bit + 1) * dbPerBit
 	default:
-		return attenuationMedium
+		return attenuationHigh // Default to high quality
 	}
 }
 
@@ -835,7 +912,7 @@ type polyphaseFilter struct {
 // designPolyphaseFilter creates a polyphase filter bank matching soxr.
 //
 // Key design points (from soxr analysis):
-//   - 20 taps per phase ensures DC gain ≈ 1.0 per phase
+//   - Number of taps calculated dynamically using Kaiser formula: ceil(att/tr_bw + 1)
 //   - Prototype filter DC gain = numPhases
 //   - Each phase independently has DC gain ≈ 1.0
 //   - Cutoff frequency calculated using soxr's Fp/Fs methodology
@@ -852,11 +929,6 @@ type polyphaseFilter struct {
 //   - totalIORatio: total input/output ratio for the full resampler (used for Fp1 calculation)
 //   - quality: quality level
 func designPolyphaseFilter(numPhases int, ratio, totalIORatio float64, quality Quality) (*polyphaseFilter, error) {
-	const tapsPerPhase = 20 // Match soxr exactly
-
-	// Total taps in prototype filter
-	totalTaps := numPhases*tapsPerPhase - 1 // soxr uses (phases * taps) - 1
-
 	attenuation := qualityToAttenuation(quality)
 
 	// soxr's cr.c uses the TOTAL io_ratio for Fp1:
@@ -864,28 +936,35 @@ func designPolyphaseFilter(numPhases int, ratio, totalIORatio float64, quality Q
 	//
 	// For 44100→96000: io_ratio = 44100/96000 = 0.459375
 	// With rolloff=0: Fp1 = io_ratio * 0.95 ≈ 0.4364
-	// soxr trace shows Fp1=0.4557 which is slightly higher
 	//
-	// For upsampling, Fs1 = 0.5 (Nyquist) - the anti-imaging filter should
-	// block everything above the original Nyquist frequency.
+	// For upsampling (totalIORatio < 1), the filter should pass frequencies
+	// up to the original Nyquist (scaled by totalIORatio).
 	//
-	// For downsampling (when totalIORatio > 1), we need to use the polyphase
-	// ratio itself to determine the passband edge.
+	// For downsampling (totalIORatio >= 1), the filter should pass frequencies
+	// up to the output Nyquist to prevent aliasing.
 	var Fp1 float64
-	if ratio > 1.0 {
-		// Upsampling: use totalIORatio
-		Fp1 = totalIORatio * passbandRolloffScale // Passband end slightly below io_ratio
+	if totalIORatio < 1.0 {
+		// Overall UPSAMPLING: use totalIORatio (input/output) for passband
+		Fp1 = totalIORatio * passbandRolloffScale
 	} else {
-		// Downsampling: Fp1 is based on output Nyquist relative to input
-		// ratio = output/input, so output Nyquist = 0.5 * ratio in input terms
-		// Fp1 = 0.5 * ratio * 0.99 = passband edge at 99% of output Nyquist
-		Fp1 = nyquistFraction * ratio * passbandRolloffScale // Passband end at ~99% of output Nyquist
+		// Overall DOWNSAMPLING: Fp1 based on output Nyquist relative to input
+		// For downsampling, ratio = output/input, so output Nyquist = 0.5 * ratio
+		Fp1 = nyquistFraction * ratio * passbandRolloffScale
 	}
 	Fs1 := nyquistFraction // Stopband starts at Nyquist
 
 	var Fp, Fs float64
 
-	if ratio > 1.0 {
+	// Determine if this is an UPSAMPLING or DOWNSAMPLING operation.
+	// We use totalIORatio (input_rate/output_rate) to determine the overall direction:
+	// - totalIORatio < 1 means overall UPSAMPLING (output rate > input rate)
+	// - totalIORatio >= 1 means overall DOWNSAMPLING (output rate <= input rate)
+	//
+	// The polyphase ratio might be < 1 even for upsampling (e.g., DFT 2x then polyphase),
+	// but the filter design should follow the overall direction.
+	isOverallUpsampling := totalIORatio < 1.0
+
+	if isOverallUpsampling {
 		// UPSAMPLING: Need anti-imaging filter
 		// Following soxr's cr.c methodology exactly:
 		//
@@ -901,29 +980,136 @@ func designPolyphaseFilter(numPhases int, ratio, totalIORatio float64, quality Q
 		Fp = Fs - (Fs-Fp1)/(1.0-invFResp)
 	} else {
 		// DOWNSAMPLING: Need anti-aliasing filter
-		// Scale by the downsampling ratio to prevent aliasing
+		// For downsampling, the filter must reject frequencies above the output
+		// Nyquist to prevent aliasing when we decimate.
+		//
+		// The passband edge is at the output Nyquist (Fp1 = 0.5 * ratio * 0.99)
+		// The stopband should start slightly above that with enough transition
+		// band for a practical filter.
+		//
+		// Key insight: For downsampling, we use a simpler approach than soxr's
+		// complex multi-stage architecture. We set Fs slightly above Fp1 to
+		// provide a reasonable transition band, scaled by the ratio.
+		//
+		// For aggressive downsampling (ratio <= 0.5), the output Nyquist is low,
+		// so we need a tighter filter. For mild downsampling (ratio > 0.5),
+		// we have more frequency room for the transition band.
+
+		// Passband at output Nyquist (scaled by 0.99 for rolloff margin)
 		Fp = Fp1
-		Fs = Fs1 * ratio
+
+		// Stopband: Provide reasonable transition band
+		// Scale the transition band based on the ratio for proper anti-aliasing
+		// For ratio = 0.5: transition = 0.15 * 0.5 = 0.075 (pretty tight)
+		// For ratio = 0.9: transition = 0.15 * 0.9 = 0.135 (wider)
+		transitionScale := downsamplingTransitionScale * ratio
+		Fs = Fp1 + transitionScale
+		if Fs > Fs1 {
+			Fs = Fs1 // Cap at input Nyquist
+		}
 	}
 
-	// Calculate prototype filter cutoff following soxr's filter.c methodology:
-	// From soxr: Fc = Fs/phases - tr_bw where tr_bw = 0.5 * (Fs - Fp) / phases
-	// This simplifies to: Fc = (Fp + Fs) / (2 * phases)
+	// Calculate transition bandwidth following soxr's filter.c:
+	//   tr_bw = 0.5 * (Fs - Fp)
+	//   tr_bw /= phases
+	//   tr_bw = min(tr_bw, 0.5 * Fs / phases)
 	//
-	// Normalization conversion:
-	//   - soxr uses [0, 1] where 1.0 = Nyquist frequency
-	//   - Our filter design (kaiser.go) uses [0, 0.5] where 0.5 = Nyquist
-	//   - To convert: our_cutoff = soxr_Fc / 2
-	//
-	// Combined formula: cutoff = (Fp + Fs) / (2 * phases) / 2 = (Fp + Fs) / (4 * phases)
-	//
-	// Verified against soxr trace for 44100→96000:
-	//   Fp=0.2371, Fs=1.5136, phases=160
-	//   soxrFc = (0.2371 + 1.5136) / (2 * 160) = 0.00547 ✓ matches soxr
-	//   cutoff = 0.00547 / 2 = 0.00274 (in our [0,0.5] scale)
+	// Also enforce a minimum transition bandwidth to keep filter lengths practical.
+	// For very narrow transition bands (ratios close to 1.0), we widen the transition
+	// band, accepting some aliasing in the transition region in exchange for a
+	// practical filter length.
 	phases := float64(numPhases)
-	soxrFc := (Fp + Fs) / (soxrFcDenominator * phases) // soxr's Fc in [0,1] scale (1.0 = Nyquist)
-	cutoff := soxrFc / soxrToOurNormScale              // Convert to our [0,0.5] scale (0.5 = Nyquist)
+	trBw := transitionBandwidthHalf * (Fs - Fp)
+	trBw /= phases
+
+	// Minimum transition bandwidth to keep filter length under ~8000 taps
+	// From Kaiser formula: totalTaps = ceil(att/tr_bw + 1)
+	// For 180 dB attenuation and 8000 taps: tr_bw_min = 180 / 7999 ≈ 0.0225
+	const minTrBw = 0.02 // Ensures reasonable filter length even for difficult ratios
+
+	trBwLimit := transitionBandwidthHalf * Fs / phases
+	if trBw > trBwLimit {
+		trBw = trBwLimit
+	}
+	if trBw < minTrBw {
+		trBw = minTrBw
+	}
+
+	// Calculate taps using Kaiser formula from soxr's filter.c:
+	//   num_taps = ceil(att/tr_bw + 1)
+	//
+	// For high attenuation (>60 dB), soxr uses a modified formula based on beta:
+	//   att_adjusted = ((.0007528358-1.577737e-05*beta)*beta+.6248022)*beta+.06186902
+	// But the simple formula works well for our attenuation range.
+	//
+	// We also apply a minimum taps per phase to ensure filter quality.
+	const minTapsPerPhase = 8   // Minimum for reasonable filter quality
+	const maxTapsPerPhase = 64  // Maximum to prevent excessive computation
+	const maxTotalTaps = 8000   // Maximum total taps (below filter package limit of 8191)
+	const minAttenForRatio = 80 // Minimum attenuation even for difficult ratios
+
+	// For very narrow transition bands (ratios close to 1.0), the Kaiser formula
+	// can require millions of taps. In these cases, we reduce attenuation to keep
+	// the filter practical while maintaining reasonable quality.
+	effectiveAttenuation := attenuation
+	idealTotalTaps := int(math.Ceil(attenuation/trBw + 1))
+
+	if idealTotalTaps > maxTotalTaps {
+		// Reduce attenuation to achieve maxTotalTaps
+		// From: totalTaps = ceil(att/tr_bw + 1)
+		// Solve for att: att = (totalTaps - 1) * tr_bw
+		effectiveAttenuation = float64(maxTotalTaps-1) * trBw
+		if effectiveAttenuation < minAttenForRatio {
+			effectiveAttenuation = minAttenForRatio
+		}
+	}
+
+	totalTaps := int(math.Ceil(effectiveAttenuation/trBw + 1))
+	tapsPerPhase := (totalTaps + numPhases - 1) / numPhases // Round up
+
+	// Clamp taps per phase to reasonable range
+	if tapsPerPhase < minTapsPerPhase {
+		tapsPerPhase = minTapsPerPhase
+	} else if tapsPerPhase > maxTapsPerPhase {
+		tapsPerPhase = maxTapsPerPhase
+	}
+
+	// Recalculate total taps based on clamped taps per phase
+	totalTaps = numPhases*tapsPerPhase - 1 // soxr uses (phases * taps) - 1
+
+	// Calculate prototype filter cutoff.
+	//
+	// For UPSAMPLING: Following soxr's filter.c methodology:
+	//   Fc = (Fp + Fs) / (2 * phases)
+	// The prototype filter operates at numPhases × input rate for interpolation.
+	//
+	// For DOWNSAMPLING: The filter operates at the input rate for decimation.
+	// We want to cut at the output Nyquist (Fp) to prevent aliasing.
+	// The prototype is designed at the input rate, so we use:
+	//   cutoff = (Fp + Fs) / 4 (no division by phases)
+	//
+	// Normalization:
+	//   - soxr uses [0, 1] where 1.0 = Nyquist frequency
+	//   - Our filter design uses [0, 0.5] where 0.5 = Nyquist
+	var cutoff float64
+	if isOverallUpsampling {
+		// Upsampling: divide by phases (prototype at phases × input rate)
+		soxrFc := (Fp + Fs) / (soxrFcDenominator * phases)
+		cutoff = soxrFc / soxrToOurNormScale
+	} else {
+		// Downsampling: the prototype filter operates at the input rate.
+		// The cutoff should be at the output Nyquist (Fp) to prevent aliasing.
+		// But the polyphase decomposition requires the cutoff to be scaled
+		// by 1/phases for proper phase response.
+		//
+		// For decimation by M with L phases:
+		// - The prototype is designed at L×input rate (same as interpolation)
+		// - Cutoff should be at output_Nyquist / L in prototype terms
+		//
+		// output_Nyquist = Fp (in [0, 0.5] input scale)
+		// prototype cutoff = Fp / phases (since prototype is at L×input rate)
+		cutoff = Fp / phases / soxrToOurNormScale
+	}
 
 	// Ensure cutoff is valid (within 0 to 0.5 normalized range for lowpass)
 	if cutoff <= 0 {

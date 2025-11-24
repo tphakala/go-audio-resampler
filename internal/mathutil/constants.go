@@ -65,8 +65,11 @@ const (
 // From Kaiser & Schafer's empirical formulas
 const (
 	// Attenuation thresholds for β calculation
-	kaiserAttHigh   = 50.0 // High attenuation threshold (dB)
-	kaiserAttMedium = 21.0 // Medium attenuation threshold (dB)
+	kaiserAttHigh        = 50.0 // High attenuation threshold (dB)
+	kaiserAttMedium      = 21.0 // Medium attenuation threshold (dB)
+	kaiserAttPolynomial  = 60.0 // Threshold for polynomial approximation in KaiserBetaWithTrBw
+	kaiserMinTrBw        = 0.0001 // Minimum transition bandwidth to prevent log(0)
+	kaiserTrBwRealmBase  = 0.0005 // Base value for realm calculation in polynomial selection
 
 	// Kaiser β formula coefficients
 	kaiserBetaHighCoeff1 = 0.1102 // Coefficient for high attenuation

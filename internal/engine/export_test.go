@@ -1,5 +1,7 @@
 package engine
 
+import "math"
+
 // Export internal functions for testing.
 // This file uses the _test.go suffix so it's only included in test builds.
 
@@ -23,12 +25,11 @@ type PolyphaseFilterParams struct {
 
 // ComputePolyphaseFilterParams computes and returns the filter design parameters
 // without actually creating the filter. This allows testing the parameter computation.
+// NOTE: This function mirrors the logic in designPolyphaseFilter() for testing purposes.
 func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, quality Quality) PolyphaseFilterParams {
-	const tapsPerPhase = 20 // Match soxr exactly
-	totalTaps := numPhases*tapsPerPhase - 1
-
 	attenuation := qualityToAttenuation(quality)
 
+	// Passband edge calculation (matching designPolyphaseFilter)
 	var Fp1 float64
 	if ratio > 1.0 {
 		Fp1 = totalIORatio * passbandRolloffScale
@@ -39,17 +40,70 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, qu
 
 	var Fp, Fs float64
 	if ratio > 1.0 {
+		// Upsampling formula
 		Fs = imageRejectionFactor - (Fp1 + (Fs1-Fp1)*0.7)
 		invFResp := lsxInvFResp(-0.01, attenuation)
 		Fp = Fs - (Fs-Fp1)/(1.0-invFResp)
 	} else {
+		// Downsampling formula (matching polyphase.go)
 		Fp = Fp1
-		Fs = Fs1 * ratio
+		transitionScale := 0.15 * ratio
+		Fs = Fp1 + transitionScale
+		if Fs > Fs1 {
+			Fs = Fs1
+		}
 	}
 
+	// Calculate transition bandwidth (matching designPolyphaseFilter)
 	phases := float64(numPhases)
-	soxrFc := (Fp + Fs) / (soxrFcDenominator * phases)
-	cutoff := soxrFc / soxrToOurNormScale
+	trBw := 0.5 * (Fs - Fp)
+	trBw /= phases
+
+	// Minimum transition bandwidth
+	const minTrBw = 0.02
+	trBwLimit := 0.5 * Fs / phases
+	if trBw > trBwLimit {
+		trBw = trBwLimit
+	}
+	if trBw < minTrBw {
+		trBw = minTrBw
+	}
+
+	// Dynamic tap calculation (matching designPolyphaseFilter)
+	const minTapsPerPhase = 8
+	const maxTapsPerPhase = 64
+	const maxTotalTaps = 8000
+	const minAttenForRatio = 80.0
+
+	effectiveAttenuation := attenuation
+	idealTotalTaps := int(math.Ceil(attenuation/trBw + 1))
+
+	if idealTotalTaps > maxTotalTaps {
+		effectiveAttenuation = float64(maxTotalTaps-1) * trBw
+		if effectiveAttenuation < minAttenForRatio {
+			effectiveAttenuation = minAttenForRatio
+		}
+	}
+
+	totalTaps := int(math.Ceil(effectiveAttenuation/trBw + 1))
+	tapsPerPhase := (totalTaps + numPhases - 1) / numPhases
+
+	if tapsPerPhase < minTapsPerPhase {
+		tapsPerPhase = minTapsPerPhase
+	} else if tapsPerPhase > maxTapsPerPhase {
+		tapsPerPhase = maxTapsPerPhase
+	}
+
+	totalTaps = numPhases*tapsPerPhase - 1
+
+	// Cutoff calculation
+	var cutoff float64
+	if ratio > 1.0 {
+		soxrFc := (Fp + Fs) / (soxrFcDenominator * phases)
+		cutoff = soxrFc / soxrToOurNormScale
+	} else {
+		cutoff = Fp + trBw*0.5
+	}
 
 	if cutoff <= 0 {
 		cutoff = 0.001
@@ -59,16 +113,11 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, qu
 	}
 
 	transitionBW := Fs - Fp
-	if transitionBW < 0 {
-		transitionBW = -transitionBW
-	}
 
-	// Estimate required taps using Kaiser formula:
-	// N ≈ (A - 7.95) / (2.285 * Δω) where Δω = 2π * transitionBW
+	// Required taps calculation using simple Kaiser formula
 	var requiredTaps float64
 	if transitionBW > 0 {
-		deltaOmega := 2.0 * 3.14159265359 * transitionBW
-		requiredTaps = (attenuation - 7.95) / (2.285 * deltaOmega)
+		requiredTaps = attenuation/trBw + 1
 	}
 
 	return PolyphaseFilterParams{
