@@ -640,12 +640,26 @@ func TestQualityToAttenuation(t *testing.T) {
 
 func qualityName(q Quality) string {
 	switch q {
+	case QualityQuick:
+		return "quick"
 	case QualityLow:
 		return "low"
 	case QualityMedium:
 		return "medium"
 	case QualityHigh:
 		return "high"
+	case QualityVeryHigh:
+		return "veryHigh"
+	case Quality16Bit:
+		return "16bit"
+	case Quality20Bit:
+		return "20bit"
+	case Quality24Bit:
+		return "24bit"
+	case Quality28Bit:
+		return "28bit"
+	case Quality32Bit:
+		return "32bit"
 	default:
 		return "unknown"
 	}
