@@ -68,11 +68,47 @@ void compute_spectrum(const double *signal, size_t signal_len, double sample_rat
     compute_spectrum_ex(signal, signal_len, sample_rate, mag_db, freqs, fft_size, 1);
 }
 
-/* Resample using soxr VHQ */
+/* Quality preset mapping */
+typedef enum {
+    QUALITY_QUICK = 0,
+    QUALITY_LOW = 1,
+    QUALITY_MEDIUM = 2,
+    QUALITY_HIGH = 3,
+    QUALITY_VERY_HIGH = 4
+} quality_preset_t;
+
+/* Global quality setting (default to VHQ for backwards compatibility) */
+static unsigned long g_soxr_quality = SOXR_VHQ;
+
+/* Set quality preset */
+void set_quality_preset(quality_preset_t preset) {
+    switch (preset) {
+        case QUALITY_QUICK:     g_soxr_quality = SOXR_QQ; break;
+        case QUALITY_LOW:       g_soxr_quality = SOXR_LQ; break;
+        case QUALITY_MEDIUM:    g_soxr_quality = SOXR_MQ; break;
+        case QUALITY_HIGH:      g_soxr_quality = SOXR_HQ; break;
+        case QUALITY_VERY_HIGH: g_soxr_quality = SOXR_VHQ; break;
+        default:                g_soxr_quality = SOXR_VHQ; break;
+    }
+}
+
+/* Get quality name for logging */
+const char* get_quality_name(void) {
+    switch (g_soxr_quality) {
+        case SOXR_QQ:  return "Quick";
+        case SOXR_LQ:  return "Low";
+        case SOXR_MQ:  return "Medium";
+        case SOXR_HQ:  return "High";
+        case SOXR_VHQ: return "VeryHigh";
+        default:       return "Unknown";
+    }
+}
+
+/* Resample using soxr with configurable quality */
 double *resample_soxr(const double *input, size_t input_len,
                       double input_rate, double output_rate, size_t *output_len) {
 
-    soxr_quality_spec_t q_spec = soxr_quality_spec(SOXR_VHQ, 0);
+    soxr_quality_spec_t q_spec = soxr_quality_spec(g_soxr_quality, 0);
     soxr_io_spec_t io_spec = soxr_io_spec(SOXR_FLOAT64_I, SOXR_FLOAT64_I);
 
     size_t expected_output = (size_t)(input_len * output_rate / input_rate + 1024);
@@ -169,6 +205,7 @@ void measure_ripple(double input_rate, double output_rate) {
 
     printf("# Passband Ripple Test Results\n");
     printf("# ============================\n");
+    printf("# quality = %s\n", get_quality_name());
     printf("# input_rate = %.0f\n", input_rate);
     printf("# output_rate = %.0f\n", output_rate);
     printf("# test_freqs = %d tones from 500 to %.0f Hz\n", num_freqs, passband_end);
@@ -231,6 +268,7 @@ void measure_thd(double input_rate, double output_rate, double test_freq) {
 
     printf("# THD Test Results\n");
     printf("# ================\n");
+    printf("# quality = %s\n", get_quality_name());
     printf("# input_rate = %.0f\n", input_rate);
     printf("# output_rate = %.0f\n", output_rate);
     printf("# test_freq = %.0f\n", test_freq);
@@ -302,6 +340,7 @@ void measure_snr(double input_rate, double output_rate, double test_freq) {
 
     printf("# SNR Test Results\n");
     printf("# ================\n");
+    printf("# quality = %s\n", get_quality_name());
     printf("# input_rate = %.0f\n", input_rate);
     printf("# output_rate = %.0f\n", output_rate);
     printf("# test_freq = %.0f\n", test_freq);
@@ -370,6 +409,7 @@ void measure_impulse(double input_rate, double output_rate) {
 
     printf("# Impulse Response Test Results\n");
     printf("# =============================\n");
+    printf("# quality = %s\n", get_quality_name());
     printf("# input_rate = %.0f\n", input_rate);
     printf("# output_rate = %.0f\n", output_rate);
     printf("# pre_ringing_db = %.6f dB\n", pre_ringing_db);
@@ -380,20 +420,41 @@ void measure_impulse(double input_rate, double output_rate) {
     free(output);
 }
 
+/* Parse quality string to preset */
+quality_preset_t parse_quality(const char *str) {
+    if (strcmp(str, "quick") == 0 || strcmp(str, "0") == 0) return QUALITY_QUICK;
+    if (strcmp(str, "low") == 0 || strcmp(str, "1") == 0) return QUALITY_LOW;
+    if (strcmp(str, "medium") == 0 || strcmp(str, "2") == 0) return QUALITY_MEDIUM;
+    if (strcmp(str, "high") == 0 || strcmp(str, "3") == 0) return QUALITY_HIGH;
+    if (strcmp(str, "veryhigh") == 0 || strcmp(str, "4") == 0) return QUALITY_VERY_HIGH;
+    return QUALITY_VERY_HIGH; /* default */
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 4) {
-        fprintf(stderr, "Usage: %s <input_rate> <output_rate> <test_type>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <input_rate> <output_rate> <test_type> [quality]\n", argv[0]);
         fprintf(stderr, "\nTest types:\n");
         fprintf(stderr, "  ripple       - Passband ripple measurement\n");
         fprintf(stderr, "  thd:1000     - THD at 1000 Hz\n");
         fprintf(stderr, "  snr:1000     - SNR with 1000 Hz tone\n");
         fprintf(stderr, "  impulse      - Impulse response analysis\n");
+        fprintf(stderr, "\nQuality presets (optional, default=veryhigh):\n");
+        fprintf(stderr, "  quick/0      - Quick (SOXR_QQ)\n");
+        fprintf(stderr, "  low/1        - Low (SOXR_LQ)\n");
+        fprintf(stderr, "  medium/2     - Medium (SOXR_MQ)\n");
+        fprintf(stderr, "  high/3       - High (SOXR_HQ)\n");
+        fprintf(stderr, "  veryhigh/4   - Very High (SOXR_VHQ)\n");
         return 1;
     }
 
     double input_rate = atof(argv[1]);
     double output_rate = atof(argv[2]);
     char *test_type = argv[3];
+
+    /* Set quality if provided */
+    if (argc >= 5) {
+        set_quality_preset(parse_quality(argv[4]));
+    }
 
     if (strcmp(test_type, "ripple") == 0) {
         measure_ripple(input_rate, output_rate);
