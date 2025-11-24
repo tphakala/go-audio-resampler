@@ -192,7 +192,9 @@ func TestPassbandRipple_CompareWithSoxr(t *testing.T) {
 		{48000, 44100, "48kHz_to_44.1kHz_DAT_to_CD"},
 		{48000, 96000, "48kHz_to_96kHz_2x_upsample"},
 		{96000, 48000, "96kHz_to_48kHz_2x_downsample"},
-		{48000, 32000, "48kHz_to_32kHz_BirdNET"},
+		{48000, 32000, "48kHz_to_32kHz_BirdNET_v3"},
+		{16000, 48000, "16kHz_to_48kHz_BirdNET_v2.4"},
+		{32000, 48000, "32kHz_to_48kHz_BirdNET_v2.4"},
 	}
 
 	for _, tc := range testCases {
@@ -352,7 +354,9 @@ func TestTHD_CompareWithSoxr(t *testing.T) {
 		{48000, 44100, 1000, "48kHz_to_44.1kHz_1kHz"},
 		{48000, 96000, 1000, "48kHz_to_96kHz_1kHz"},
 		{96000, 48000, 1000, "96kHz_to_48kHz_1kHz"},
-		{48000, 32000, 1000, "48kHz_to_32kHz_1kHz"},
+		{48000, 32000, 1000, "48kHz_to_32kHz_BirdNET_v3_1kHz"},
+		{16000, 48000, 1000, "16kHz_to_48kHz_BirdNET_v2.4_1kHz"},
+		{32000, 48000, 1000, "32kHz_to_48kHz_BirdNET_v2.4_1kHz"},
 		{44100, 48000, 10000, "44.1kHz_to_48kHz_10kHz"},
 		{48000, 44100, 10000, "48kHz_to_44.1kHz_10kHz"},
 	}
@@ -509,7 +513,9 @@ func TestSNR_CompareWithSoxr(t *testing.T) {
 		{48000, 44100, "48kHz_to_44.1kHz"},
 		{48000, 96000, "48kHz_to_96kHz"},
 		{96000, 48000, "96kHz_to_48kHz"},
-		{48000, 32000, "48kHz_to_32kHz"},
+		{48000, 32000, "48kHz_to_32kHz_BirdNET_v3"},
+		{16000, 48000, "16kHz_to_48kHz_BirdNET_v2.4"},
+		{32000, 48000, "32kHz_to_48kHz_BirdNET_v2.4"},
 	}
 
 	testFreq := 1000.0
@@ -646,7 +652,9 @@ func TestImpulseResponse_CompareWithSoxr(t *testing.T) {
 		{48000, 44100, "48kHz_to_44.1kHz"},
 		{48000, 96000, "48kHz_to_96kHz"},
 		{96000, 48000, "96kHz_to_48kHz"},
-		{48000, 32000, "48kHz_to_32kHz"},
+		{48000, 32000, "48kHz_to_32kHz_BirdNET_v3"},
+		{16000, 48000, "16kHz_to_48kHz_BirdNET_v2.4"},
+		{32000, 48000, "32kHz_to_48kHz_BirdNET_v2.4"},
 	}
 
 	for _, tc := range testCases {
