@@ -1,0 +1,189 @@
+version: '3'
+
+vars:
+  BINARY_DIR: ./bin
+  EXE: '{{if eq OS "windows"}}.exe{{end}}'
+  RESAMPLE_WAV: '{{.BINARY_DIR}}/resample-wav{{.EXE}}'
+  RESAMPLE_DEMO: '{{.BINARY_DIR}}/resample{{.EXE}}'
+  SOXR_REF: ./test-reference/test_soxr_reference
+  SOXR_BENCH: ./test-reference/bench_soxr
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # Build tasks
+  build:
+    desc: Build all binaries
+    deps: [build:resample-wav, build:demo]
+
+  build:resample-wav:
+    desc: Build the resample-wav CLI tool
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - GOAMD64=v3 go build -o {{.RESAMPLE_WAV}} ./cmd/resample-wav
+    sources:
+      - ./cmd/resample-wav/**/*.go
+      - ./pkg/**/*.go
+    generates:
+      - '{{.RESAMPLE_WAV}}'
+
+  build:demo:
+    desc: Build the demo/benchmark tool
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - GOAMD64=v3 go build -o {{.RESAMPLE_DEMO}} ./cmd/resample
+    sources:
+      - ./cmd/resample/**/*.go
+      - ./pkg/**/*.go
+    generates:
+      - '{{.RESAMPLE_DEMO}}'
+
+  build:soxr-ref:
+    desc: Build soxr reference tools (requires libsoxr)
+    dir: ./test-reference
+    cmds:
+      - make
+
+  # Test tasks
+  test:
+    desc: Run all tests
+    cmds:
+      - go test ./...
+
+  test:verbose:
+    desc: Run all tests with verbose output
+    cmds:
+      - go test -v ./...
+
+  test:race:
+    desc: Run tests with race detector
+    cmds:
+      - go test -race ./...
+
+  test:coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+    silent: true
+
+  test:soxr:
+    desc: Run soxr comparison tests
+    deps: [build:soxr-ref]
+    cmds:
+      - go test -v ./pkg/engine/... -run Soxr
+
+  # Benchmark tasks
+  bench:
+    desc: Run all benchmarks
+    cmds:
+      - go test -bench=. -benchmem ./...
+
+  bench:engine:
+    desc: Run engine benchmarks
+    cmds:
+      - go test -bench=. -benchmem ./pkg/engine/...
+
+  bench:profile:
+    desc: Run benchmarks with CPU profiling
+    cmds:
+      - go test -bench=BenchmarkBreakdown -cpuprofile=cpu.prof ./pkg/engine/...
+
+  bench:compare:
+    desc: Compare Go vs soxr performance
+    deps: [build:soxr-ref]
+    cmds:
+      - go test -bench=BenchmarkResampler -benchmem ./pkg/engine/...
+      - ./test-reference/bench_soxr
+
+  # Lint and format tasks
+  lint:
+    desc: Run linter
+    cmds:
+      - golangci-lint run ./...
+
+  fmt:
+    desc: Format code
+    cmds:
+      - go fmt ./...
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  # Development tasks
+  check:
+    desc: Run all checks (fmt, vet, lint, test)
+    cmds:
+      - task: fmt
+      - task: vet
+      - task: lint
+      - task: test
+
+  tidy:
+    desc: Tidy go modules
+    cmds:
+      - go mod tidy
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf {{.BINARY_DIR}}
+      - rm -f coverage.out coverage.html
+      - rm -f cpu.prof mem.prof
+
+  clean:all:
+    desc: Clean all artifacts including soxr reference
+    cmds:
+      - task: clean
+      - cd test-reference && make clean
+
+  # Demo tasks
+  demo:
+    desc: Run the demo
+    deps: [build:demo]
+    cmds:
+      - '{{.RESAMPLE_DEMO}} -demo'
+
+  # Resample example tasks
+  resample:
+    desc: Resample a WAV file (usage task resample -- input.wav output.wav)
+    deps: [build:resample-wav]
+    cmds:
+      - '{{.RESAMPLE_WAV}} {{.CLI_ARGS}}'
+
+  resample:16k:
+    desc: Resample to 16kHz (usage task resample:16k -- input.wav output.wav)
+    deps: [build:resample-wav]
+    cmds:
+      - '{{.RESAMPLE_WAV}} -rate 16 {{.CLI_ARGS}}'
+
+  resample:48k:
+    desc: Resample to 48kHz (usage task resample:48k -- input.wav output.wav)
+    deps: [build:resample-wav]
+    cmds:
+      - '{{.RESAMPLE_WAV}} -rate 48 {{.CLI_ARGS}}'
+
+  # Install task
+  install:
+    desc: Install resample-wav to GOPATH/bin
+    cmds:
+      - GOAMD64=v3 go install ./cmd/resample-wav
+
+  # Documentation
+  doc:
+    desc: Start godoc server at localhost:6060
+    cmds:
+      - godoc -http=:6060
+
+  # Release helpers
+  release:check:
+    desc: Check if ready for release
+    cmds:
+      - task: tidy
+      - task: check
+      - task: test:race

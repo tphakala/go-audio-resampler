@@ -1,0 +1,96 @@
+{
+  "antialiasing": {
+    "48000_96000_noise": 149.31,
+    "48000_96000_multitone": 145.97,
+    "44100_88200_noise": 149.71,
+    "44100_96000_noise": 150.0,
+    "48000_32000_alias_tones": 172.22,
+    "48000_44100_alias_tones": 171.59,
+    "96000_48000_alias_tones": 157.14
+  },
+  "quality": {
+    "ripple_44100_48000": {
+      "ripple": 1.323845,
+      "max_dev": 0.462183,
+      "min_dev": -0.861662
+    },
+    "ripple_48000_44100": {
+      "ripple": 1.312032,
+      "max_dev": 0.445423,
+      "min_dev": -0.866609
+    },
+    "ripple_48000_96000": {
+      "ripple": 1.381138,
+      "max_dev": 0.498782,
+      "min_dev": -0.882356
+    },
+    "ripple_96000_48000": {
+      "ripple": 1.384126,
+      "max_dev": 0.462928,
+      "min_dev": -0.921198
+    },
+    "ripple_48000_32000": {
+      "ripple": 1.310118,
+      "max_dev": 0.461617,
+      "min_dev": -0.848501
+    },
+    "thd_44100_48000_1000": {
+      "thd_db": -162.223015,
+      "thd_percent": 7.7e-07
+    },
+    "thd_48000_44100_1000": {
+      "thd_db": -162.943501,
+      "thd_percent": 7.1e-07
+    },
+    "thd_48000_96000_1000": {
+      "thd_db": -142.798861,
+      "thd_percent": 7.25e-06
+    },
+    "thd_96000_48000_1000": {
+      "thd_db": -162.224823,
+      "thd_percent": 7.7e-07
+    },
+    "thd_48000_32000_1000": {
+      "thd_db": -193.428342,
+      "thd_percent": 2e-08
+    },
+    "thd_44100_48000_10000": {
+      "thd_db": -207.28071,
+      "thd_percent": 0.0
+    },
+    "thd_48000_44100_10000": {
+      "thd_db": -210.53565,
+      "thd_percent": 0.0
+    },
+    "snr_44100_48000": 35.520193,
+    "snr_48000_44100": 32.793197,
+    "snr_48000_96000": 32.511782,
+    "snr_96000_48000": 35.520193,
+    "snr_48000_32000": 99.261761,
+    "impulse_44100_48000": {
+      "pre_ringing_db": -22.009825,
+      "post_ringing_db": -28.618212,
+      "ringout_samples": 61
+    },
+    "impulse_48000_44100": {
+      "pre_ringing_db": -17.64518,
+      "post_ringing_db": -30.056983,
+      "ringout_samples": 56
+    },
+    "impulse_48000_96000": {
+      "pre_ringing_db": -3.55068,
+      "post_ringing_db": -27.334657,
+      "ringout_samples": 114
+    },
+    "impulse_96000_48000": {
+      "pre_ringing_db": -26.703495,
+      "post_ringing_db": -30.126424,
+      "ringout_samples": 57
+    },
+    "impulse_48000_32000": {
+      "pre_ringing_db": -5.359148,
+      "post_ringing_db": -33.852439,
+      "ringout_samples": 48
+    }
+  }
+}
