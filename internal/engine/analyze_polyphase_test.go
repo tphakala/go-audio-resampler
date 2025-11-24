@@ -32,12 +32,12 @@ func TestAnalyzePolyphase(t *testing.T) {
 		dftOutput := inputSamples * 2
 
 		// Polyphase iterations = (dftOutput * numPhases) / step approximately
-		polyphaseIterations := (dftOutput * numPhases) / step
+		polyphaseIterations := (int64(dftOutput) * int64(numPhases)) / step
 
 		fmt.Printf("  DFT output samples: %d\n", dftOutput)
 		fmt.Printf("  Polyphase iterations (output samples): ~%d\n", polyphaseIterations)
 		fmt.Printf("  Total multiply-adds: %d × %d taps = %dK\n",
-			polyphaseIterations, taps, polyphaseIterations*taps/1000)
+			polyphaseIterations, taps, polyphaseIterations*int64(taps)/1000)
 
 		// Power of 2?
 		isPow2 := numPhases > 0 && (numPhases&(numPhases-1)) == 0

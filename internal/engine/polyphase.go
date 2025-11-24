@@ -330,6 +330,14 @@ const (
 	minAttenuation = 1.0   // Minimum attenuation in dB (prevents polynomial issues)
 	maxAttenuation = 300.0 // Maximum attenuation in dB (prevents x*0.5 > π)
 	sineEpsilon    = 1e-10 // Minimum value for sin(x*0.5) to avoid log(0) or log(negative)
+
+	// Cubic interpolation constants for Catmull-Rom style coefficient interpolation.
+	// Used in NewPolyphaseStage to compute smooth interpolation between phases.
+	// Formula: f(x) = a + b*x + c*x² + d*x³
+	cubicPhaseOffset    = 2   // Offset to get f2 (two phases ahead)
+	cubicCenterCoeff    = 0.5 // Coefficient for computing c: c = 0.5*(f1+fm1) - f0
+	cubicDivisor        = 6.0 // Divisor for computing d: d = (1/6) * (...)
+	cubicCMultiplier    = 4.0 // Multiplier for c in d formula: d = (1/6)*(f2-f1+fm1-f0 - 4*c)
 )
 
 // qualityToAttenuation returns stopband attenuation for quality level.
@@ -693,31 +701,38 @@ func (s *DFTStage[F]) Reset() {
 //
 // Type parameter F controls the precision of sample processing.
 //
-// This uses integer division/modulo for phase calculation (poly-fir0.h style):
-//
-//	at += step
-//	div := at / L    // Input sample index
-//	phase := at % L  // Phase index
-//
-// This is simpler and more robust than fractional phase accumulation.
+// This uses sub-phase coefficient interpolation matching soxr's poly-fir.h:
+// - Fixed-point phase accumulator with 32-bit fractional precision
+// - Cubic polynomial interpolation between phases: coef(x) = a + x*(b + x*(c + x*d))
+// - This provides smooth coefficient transitions and excellent THD at high frequencies
 type PolyphaseStage[F simdops.Float] struct {
-	// Filter coefficients - phase-first layout for cache efficiency
-	// polyCoeffs[phase][tap] - all taps for one phase are contiguous
-	polyCoeffs   [][]F
+	// Filter coefficients with cubic interpolation support
+	// polyCoeffs[phase][tap] - base coefficient (a)
+	// polyCoeffsB/C/D[phase][tap] - cubic interpolation coefficients
+	polyCoeffs  [][]F
+	polyCoeffsB [][]F // Linear coefficient (b)
+	polyCoeffsC [][]F // Quadratic coefficient (c)
+	polyCoeffsD [][]F // Cubic coefficient (d)
+
 	numPhases    int // L in soxr
-	tapsPerPhase int // Number of taps per phase (20 to match soxr)
+	tapsPerPhase int // Number of taps per phase
 
 	// Precomputed loop bounds (avoid recalculating each iteration)
 	tapsPerPhase4 int // tapsPerPhase &^ 3, for loop unrolling
 
-	// Phase accumulator (integer, like soxr)
-	at   int // Current position (in phase units)
-	step int // Step per output sample (arbM in soxr)
+	// Phase accumulator - fixed-point with 32-bit fractional precision (like soxr)
+	// at = integer_part * (1 << phaseFracBits) + fractional_part
+	at   int64 // Current position in fixed-point
+	step int64 // Step per output sample in fixed-point
+
+	// Phase extraction constants
+	phaseFracBits int   // Number of bits for sub-phase interpolation
+	phaseFracMask int64 // Mask for extracting fractional bits
 
 	// Input history buffer
 	history []F
 
-	// Pre-allocated output buffer for reduced allocations (Go 1.24+ optimization)
+	// Pre-allocated output buffer for reduced allocations
 	outputBuf []F
 
 	// SIMD operations for type F
@@ -747,7 +762,7 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 	// Find rational approximation for the ratio
 	// We want: ratio ≈ L / step (output samples per input sample)
 	// So: step / L ≈ 1 / ratio
-	numPhases, step := findRationalApprox(ratio)
+	numPhases, stepInt := findRationalApprox(ratio)
 
 	// Design polyphase filter bank (always in float64 for precision)
 	// Pass totalIORatio and hasPreStage for correct Fp1/Fn calculation (soxr uses total ratio)
@@ -756,50 +771,103 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 		return nil, fmt.Errorf("failed to design polyphase filter: %w", err)
 	}
 
-	// Convert to phase-first layout for cache efficiency
-	// Original: coeffs[tap * numPhases + phase]
-	// New: polyCoeffs[phase][tap] in REVERSED order
-	// Also convert from float64 to target precision F
-	//
-	// IMPORTANT: Coefficients must be reversed for proper convolution!
-	// The polyphase formula is: y[m] = Σⱼ h[phase + j×L] × x[n - j]
-	// But we access history as history[div:div+tapsPerPhase] = x[div], x[div+1], ...
-	// So we need: output = coeffs_reversed[0]*x[div] + coeffs_reversed[1]*x[div+1] + ...
-	// which equals: coeffs[last]*x[div] + coeffs[last-1]*x[div+1] + ...
-	// This gives the correct convolution direction.
 	tapsPerPhase := filterBank.tapsPerPhase
+
+	// Sub-phase interpolation configuration (matching soxr's poly-fir.h)
+	// We use 16 bits for sub-phase precision (65536 sub-phases per phase)
+	// This provides excellent THD at high frequencies while keeping integer math fast
+	const phaseFracBits = 16
+	const phaseFracMask = (1 << phaseFracBits) - 1
+
+	// Compute step as a true fixed-point number with full fractional precision
+	// step = (1/ratio) * numPhases * (1 << phaseFracBits)
+	// This is CRITICAL: using stepInt would lose fractional precision and make
+	// sub-phase interpolation useless (frac would always be 0)
+	_ = stepInt // Keep for rational approximation validation (used in filter design)
+	phaseFracScale := float64(int64(1) << phaseFracBits)
+	step := int64(math.Round((1.0 / ratio) * float64(numPhases) * phaseFracScale))
+
+	// Helper function to get prototype coefficient with wrap-around for interpolation
+	getCoeff := func(phase, tap int) float64 {
+		// Wrap phase around for interpolation at boundaries
+		wrappedPhase := phase % numPhases
+		if wrappedPhase < 0 {
+			wrappedPhase += numPhases
+		}
+		idx := tap*numPhases + wrappedPhase
+		if idx < 0 || idx >= len(filterBank.coeffs) {
+			return 0.0
+		}
+		return filterBank.coeffs[idx]
+	}
+
+	// Allocate coefficient arrays with cubic interpolation support
+	// polyCoeffs = a (base), polyCoeffsB = b (linear), polyCoeffsC = c (quadratic), polyCoeffsD = d (cubic)
+	// Interpolation formula: coef(x) = a + x*(b + x*(c + x*d)) where x ∈ [0, 1)
 	polyCoeffs := make([][]F, numPhases)
+	polyCoeffsB := make([][]F, numPhases)
+	polyCoeffsC := make([][]F, numPhases)
+	polyCoeffsD := make([][]F, numPhases)
+
 	for phase := range numPhases {
 		polyCoeffs[phase] = make([]F, tapsPerPhase)
+		polyCoeffsB[phase] = make([]F, tapsPerPhase)
+		polyCoeffsC[phase] = make([]F, tapsPerPhase)
+		polyCoeffsD[phase] = make([]F, tapsPerPhase)
+
 		for tap := range tapsPerPhase {
-			// Store in REVERSED order for correct convolution
-			polyCoeffs[phase][tapsPerPhase-1-tap] = F(filterBank.coeffs[tap*numPhases+phase])
+			// Get coefficients from adjacent phases for cubic interpolation
+			// f0 = current phase, f1 = next phase, fm1 = previous phase, f2 = next-next phase
+			f0 := getCoeff(phase, tap)
+			f1 := getCoeff(phase+1, tap)
+			fm1 := getCoeff(phase-1, tap)
+			f2 := getCoeff(phase+cubicPhaseOffset, tap)
+
+			// Compute cubic interpolation coefficients (Catmull-Rom style)
+			// These allow smooth interpolation: f(x) = a + b*x + c*x² + d*x³
+			a := f0
+			c := cubicCenterCoeff*(f1+fm1) - f0
+			d := (1.0 / cubicDivisor) * (f2 - f1 + fm1 - f0 - cubicCMultiplier*c)
+			b := f1 - f0 - d - c
+
+			// Store in REVERSED order for correct convolution direction
+			revTap := tapsPerPhase - 1 - tap
+			polyCoeffs[phase][revTap] = F(a)
+			polyCoeffsB[phase][revTap] = F(b)
+			polyCoeffsC[phase][revTap] = F(c)
+			polyCoeffsD[phase][revTap] = F(d)
 		}
 	}
 
 	return &PolyphaseStage[F]{
 		polyCoeffs:    polyCoeffs,
+		polyCoeffsB:   polyCoeffsB,
+		polyCoeffsC:   polyCoeffsC,
+		polyCoeffsD:   polyCoeffsD,
 		numPhases:     numPhases,
 		tapsPerPhase:  tapsPerPhase,
-		tapsPerPhase4: tapsPerPhase &^ loopUnrollMask, // Precompute for loop unrolling
+		tapsPerPhase4: tapsPerPhase &^ loopUnrollMask,
 		at:            0,
 		step:          step,
+		phaseFracBits: phaseFracBits,
+		phaseFracMask: phaseFracMask,
 		history:       make([]F, 0, tapsPerPhase*historyBufferMultiplier),
 		ops:           ops,
 	}, nil
 }
 
-// Process resamples input using soxr's polyphase algorithm.
+// Process resamples input using soxr's polyphase algorithm with cubic coefficient interpolation.
 //
-// This implements the core loop from soxr's poly-fir0.h:
+// This implements the core loop from soxr's poly-fir.h with sub-phase interpolation:
 //
-//	for i = 0; at < num_in * L; i++, at += step {
-//	    div := at / L
-//	    phase := at % L
-//	    output[i] = convolve(input[div:], coeffs[phase])
+//	for i = 0; at < num_in * L * (1<<fracBits); i++, at += step {
+//	    div := at >> (fracBits + phaseBits)      // Input sample index
+//	    phase := (at >> fracBits) & phaseMask    // Integer phase index
+//	    x := (at & fracMask) / (1<<fracBits)     // Fractional phase [0, 1)
+//	    output[i] = convolve_interpolated(input[div:], coeffs[phase], x)
 //	}
 //
-// Optimized for Go 1.25: uses FMA instructions and pre-allocated buffers.
+// The cubic interpolation formula per coefficient: coef(x) = a + x*(b + x*(c + x*d))
 func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
 	if len(input) == 0 {
 		return []F{}, nil
@@ -815,13 +883,18 @@ func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
 		return []F{}, nil
 	}
 
-	// Calculate number of output samples (matching soxr's formula)
-	numOut := (numIn*s.numPhases - s.at + s.step - 1) / s.step
+	// Calculate number of output samples
+	// at is in fixed-point: integer_phase * (1 << phaseFracBits) + fractional
+	// limit = numIn * numPhases * (1 << phaseFracBits)
+	numPhases64 := int64(s.numPhases)
+	phaseFracBits := s.phaseFracBits
+	limit := int64(numIn) * numPhases64 << phaseFracBits
+	numOut := int((limit - s.at + s.step - 1) / s.step)
 	if numOut <= 0 {
 		return []F{}, nil
 	}
 
-	// Reuse output buffer to reduce allocations (Go 1.24+ optimization)
+	// Reuse output buffer to reduce allocations
 	if cap(s.outputBuf) < numOut {
 		s.outputBuf = make([]F, numOut)
 	} else {
@@ -830,36 +903,55 @@ func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
 
 	// Hoist invariants out of the loop for better optimization
 	polyCoeffs := s.polyCoeffs
+	polyCoeffsB := s.polyCoeffsB
+	polyCoeffsC := s.polyCoeffsC
+	polyCoeffsD := s.polyCoeffsD
 	history := s.history
 	numPhases := s.numPhases
 	tapsPerPhase := s.tapsPerPhase
 	step := s.step
 	histLen := len(history)
-	limit := numIn * numPhases
+	phaseFracMask := s.phaseFracMask
 
-	// Main resampling loop (soxr's poly-fir0.h algorithm)
-	// Optimized with FMA, phase-first coefficients, and hoisted invariants
+	// Precompute scale factor for converting fractional bits to [0, 1)
+	fracScale := F(1.0 / float64(int64(1)<<phaseFracBits))
+
+	// Main resampling loop with cubic coefficient interpolation
 	at := s.at
 	outIdx := 0
 	for at < limit {
-		// Integer division and modulo for phase calculation
-		div := at / numPhases   // Input sample index
-		phase := at % numPhases // Phase index (0 to numPhases-1)
+		// Extract integer phase and fractional sub-phase from fixed-point accumulator
+		// at = (input_sample * numPhases + integer_phase) << phaseFracBits + frac
+		fullPhase := at >> phaseFracBits      // input_sample * numPhases + integer_phase
+		div := int(fullPhase / numPhases64)   // Input sample index
+		phase := int(fullPhase % numPhases64) // Integer phase index (0 to numPhases-1)
+		frac := at & phaseFracMask            // Fractional phase (0 to phaseFracMask)
+		x := F(frac) * fracScale              // Fractional phase normalized to [0, 1)
 
 		// Boundary check
 		if div+tapsPerPhase > histLen {
 			break
 		}
 
-		// Convolve: sum over all taps in this phase
-		// Phase-first layout: polyCoeffs[phase][tap] - cache friendly!
-		// Uses SIMD dot product (AVX on AMD64, NEON on ARM64)
-		// DotProductUnsafe skips bounds checking - safe here due to boundary check above
-		coeffs := polyCoeffs[phase][:tapsPerPhase:tapsPerPhase]
-		hist := history[div : div+tapsPerPhase : div+tapsPerPhase]
+		// Convolve with cubic coefficient interpolation
+		// For each tap: interpolated_coef = a + x*(b + x*(c + x*d))
+		// Then: sum += interpolated_coef * input[tap]
+		coeffsA := polyCoeffs[phase]
+		coeffsB := polyCoeffsB[phase]
+		coeffsC := polyCoeffsC[phase]
+		coeffsD := polyCoeffsD[phase]
+		hist := history[div : div+tapsPerPhase]
 
-		// SIMD-optimized dot product (unsafe variant for hot path)
-		sum := s.ops.DotProductUnsafe(coeffs, hist)
+		var sum F
+		for tap := range tapsPerPhase {
+			// Horner's method for cubic polynomial: a + x*(b + x*(c + x*d))
+			a := coeffsA[tap]
+			b := coeffsB[tap]
+			c := coeffsC[tap]
+			d := coeffsD[tap]
+			interpolatedCoef := a + x*(b+x*(c+x*d))
+			sum += interpolatedCoef * hist[tap]
+		}
 
 		s.outputBuf[outIdx] = sum
 		outIdx++
@@ -870,19 +962,19 @@ func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
 	output := s.outputBuf[:outIdx]
 
 	// Consume processed samples from history
-	consumed := at / numPhases
+	consumed := int(at>>phaseFracBits) / numPhases
 	if consumed > 0 && consumed <= histLen {
 		copy(s.history, s.history[consumed:])
 		s.history = s.history[:histLen-consumed]
 	}
 
-	// Save remainder for next call (matching soxr: p->at.integer = at % p->L)
-	s.at = at % numPhases
+	// Save remainder for next call
+	// Keep the fractional part within one input sample
+	s.at = at - int64(consumed*numPhases)<<phaseFracBits
 
 	s.samplesOut += int64(len(output))
 
 	// Return a copy to prevent caller's slice from being corrupted
-	// if they call Process() or Flush() again (which reuses s.outputBuf)
 	result := make([]F, len(output))
 	copy(result, output)
 	return result, nil

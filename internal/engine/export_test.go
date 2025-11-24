@@ -47,7 +47,7 @@ func ExportedQualityToAttenuation(q Quality) float64 {
 }
 
 // GetPolyphaseStageInternals returns internal state for testing
-func (s *PolyphaseStage[F]) GetPolyphaseStageInternals() (numPhases, tapsPerPhase, step int, polyCoeffs [][]F) {
+func (s *PolyphaseStage[F]) GetPolyphaseStageInternals() (numPhases, tapsPerPhase int, step int64, polyCoeffs [][]F) {
 	return s.numPhases, s.tapsPerPhase, s.step, s.polyCoeffs
 }
 

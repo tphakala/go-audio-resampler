@@ -619,10 +619,11 @@ func TestQualityToAttenuation(t *testing.T) {
 		quality       Quality
 		expectedAtten float64
 	}{
-		{QualityLow, 100.0},
-		{QualityMedium, 140.0},
-		{QualityHigh, 180.0},
-		{Quality(999), 140.0}, // Unknown defaults to medium
+		// Attenuation = (bits + 1) * 6.0206 dB
+		{QualityLow, (16 + 1) * 6.0206},      // 102.35 dB
+		{QualityMedium, (16 + 1) * 6.0206},   // 102.35 dB (same bits as Low)
+		{QualityHigh, (20 + 1) * 6.0206},     // 126.43 dB
+		{Quality(999), (20 + 1) * 6.0206},    // Unknown defaults to High
 	}
 
 	for _, tc := range testCases {

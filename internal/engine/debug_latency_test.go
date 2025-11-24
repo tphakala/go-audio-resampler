@@ -42,7 +42,7 @@ func TestDebugLatency(t *testing.T) {
 		// Polyphase latency in intermediate samples
 		polyLatencyIntermediate := resampler.polyphaseStage.tapsPerPhase / 2
 		// Convert to output samples (approximately)
-		polyLatency = polyLatencyIntermediate * resampler.polyphaseStage.numPhases / resampler.polyphaseStage.step
+		polyLatency = int(int64(polyLatencyIntermediate) * int64(resampler.polyphaseStage.numPhases) / resampler.polyphaseStage.step)
 	}
 
 	fmt.Printf("\nEstimated total latency: %d + %d ≈ %d output samples\n",

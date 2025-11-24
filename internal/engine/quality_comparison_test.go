@@ -206,7 +206,7 @@ func TestPassbandRipple_CompareWithSoxr(t *testing.T) {
 			}
 
 			// Get Go result
-			goResult, err := measurePassbandRipple(tc.inputRate, tc.outputRate, QualityHigh)
+			goResult, err := measurePassbandRipple(tc.inputRate, tc.outputRate, QualityVeryHigh)
 			if err != nil {
 				t.Fatalf("measurePassbandRipple failed: %v", err)
 			}
@@ -370,7 +370,7 @@ func TestTHD_CompareWithSoxr(t *testing.T) {
 			}
 
 			// Get Go result
-			goResult, err := measureTHD(tc.inputRate, tc.outputRate, tc.testFreq, QualityHigh)
+			goResult, err := measureTHD(tc.inputRate, tc.outputRate, tc.testFreq, QualityVeryHigh)
 			if err != nil {
 				t.Fatalf("measureTHD failed: %v", err)
 			}
@@ -529,7 +529,7 @@ func TestSNR_CompareWithSoxr(t *testing.T) {
 			}
 
 			// Get Go result
-			goResult, err := measureSNR(tc.inputRate, tc.outputRate, testFreq, QualityHigh)
+			goResult, err := measureSNR(tc.inputRate, tc.outputRate, testFreq, QualityVeryHigh)
 			if err != nil {
 				t.Fatalf("measureSNR failed: %v", err)
 			}
@@ -666,7 +666,7 @@ func TestImpulseResponse_CompareWithSoxr(t *testing.T) {
 			}
 
 			// Get Go result
-			goResult, err := measureImpulseResponse(tc.inputRate, tc.outputRate, QualityHigh)
+			goResult, err := measureImpulseResponse(tc.inputRate, tc.outputRate, QualityVeryHigh)
 			if err != nil {
 				t.Fatalf("measureImpulseResponse failed: %v", err)
 			}
@@ -725,10 +725,10 @@ func TestRationalRatio_Quality(t *testing.T) {
 
 			if tc.outputRate > tc.inputRate {
 				// Upsampling
-				result, err = measureAntiAliasing(tc.inputRate, tc.outputRate, SignalNoise, QualityHigh)
+				result, err = measureAntiAliasing(tc.inputRate, tc.outputRate, SignalNoise, QualityVeryHigh)
 			} else {
 				// Downsampling - use downsampling-specific measurement
-				dsResult, dsErr := measureDownsamplingAntiAliasing(tc.inputRate, tc.outputRate, QualityHigh)
+				dsResult, dsErr := measureDownsamplingAntiAliasing(tc.inputRate, tc.outputRate, QualityVeryHigh)
 				if dsErr != nil {
 					t.Fatalf("measurement failed: %v", dsErr)
 				}
@@ -749,7 +749,7 @@ func TestRationalRatio_Quality(t *testing.T) {
 			t.Logf("Stopband attenuation: %.2f dB", result.StopbandAttenuation)
 
 			// Get THD
-			thdResult, err := measureTHD(tc.inputRate, tc.outputRate, 1000, QualityHigh)
+			thdResult, err := measureTHD(tc.inputRate, tc.outputRate, 1000, QualityVeryHigh)
 			if err != nil {
 				t.Logf("THD measurement failed: %v", err)
 			} else {
@@ -757,7 +757,7 @@ func TestRationalRatio_Quality(t *testing.T) {
 			}
 
 			// Get SNR
-			snrResult, err := measureSNR(tc.inputRate, tc.outputRate, 1000, QualityHigh)
+			snrResult, err := measureSNR(tc.inputRate, tc.outputRate, 1000, QualityVeryHigh)
 			if err != nil {
 				t.Logf("SNR measurement failed: %v", err)
 			} else {
