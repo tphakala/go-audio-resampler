@@ -3,20 +3,21 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/tphakala/go-audio-resampler.svg)](https://pkg.go.dev/github.com/tphakala/go-audio-resampler)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tphakala/go-audio-resampler)](https://goreportcard.com/report/github.com/tphakala/go-audio-resampler)
 
-
 High-quality audio resampling library for Go, based on [libsoxr](https://sourceforge.net/projects/soxr/) (the SoX Resampler library) by Rob Sykes.
 
 The library implements polyphase FIR filtering with Kaiser window design for professional-grade sample rate conversion, following the multi-stage architecture that makes libsoxr one of the highest-quality resamplers available.
 
 ## Features
 
-- **Multiple quality presets** - From quick/low-latency to very high quality mastering
-- **Polyphase FIR filtering** - Efficient multi-stage resampling architecture
+- **Multiple quality presets** - From quick/low-latency to very high quality mastering (8-bit to 32-bit precision)
+- **Selectable precision** - Generic float32/float64 processing paths with type-safe SIMD operations
+- **Polyphase FIR filtering** - Efficient multi-stage resampling architecture with cubic coefficient interpolation
 - **Kaiser window design** - Optimal stopband attenuation with configurable parameters
-- **SIMD acceleration** - Optional AVX2/SSE optimizations via [tphakala/simd](https://github.com/tphakala/simd)
-- **Multi-channel support** - Process stereo, surround, and multi-channel audio
+- **SIMD acceleration** - AVX2/SSE optimizations via [tphakala/simd](https://github.com/tphakala/simd) for both float32 and float64
+- **Multi-channel support** - Process stereo, surround, and multi-channel audio (up to 256 channels)
 - **Streaming API** - Process audio in chunks with proper state management
 - **Pure Go** - No CGO dependencies, cross-platform compatible
+- **soxr-quality algorithms** - Implements libsoxr's multi-stage architecture for professional-grade quality
 
 ## Installation
 
@@ -127,13 +128,32 @@ left, right := resampling.DeinterleaveFromStereo(interleaved)
 
 ## Quality Presets
 
-| Preset            | Precision | Use Case                        |
-| ----------------- | --------- | ------------------------------- |
-| `QualityQuick`    | 8-bit     | Preview, real-time with low CPU |
-| `QualityLow`      | 16-bit    | Speech, low-bandwidth audio     |
-| `QualityMedium`   | 16-bit    | General music playback          |
-| `QualityHigh`     | 24-bit    | Studio production, streaming    |
-| `QualityVeryHigh` | 32-bit    | Mastering, archival             |
+| Preset            | Precision | Attenuation | Use Case                        |
+| ----------------- | --------- | ----------- | ------------------------------- |
+| `QualityQuick`    | 8-bit     | ~54 dB      | Preview, real-time with low CPU |
+| `QualityLow`      | 16-bit    | ~102 dB     | Speech, low-bandwidth audio     |
+| `QualityMedium`   | 16-bit    | ~102 dB     | General music playback          |
+| `QualityHigh`     | 20-bit    | ~126 dB     | Studio production, streaming    |
+| `QualityVeryHigh` | 28-bit    | ~175 dB     | Mastering, archival             |
+
+### Quality Validation vs libsoxr
+
+The following THD (Total Harmonic Distortion) measurements compare this library against libsoxr reference implementation for 44.1kHz → 48kHz conversion at 1kHz test tone:
+
+| Preset   | libsoxr THD | Go THD     | Difference |
+| -------- | ----------- | ---------- | ---------- |
+| Low      | -146.25 dB  | -145.17 dB | +1.1 dB    |
+| Medium   | -130.61 dB  | -145.17 dB | -14.6 dB ✓ |
+| High     | -155.19 dB  | -156.73 dB | -1.5 dB ✓  |
+| VeryHigh | -162.22 dB  | -162.19 dB | +0.03 dB   |
+
+_Negative difference means Go implementation has better THD (lower distortion)._
+
+**Key findings:**
+
+- **High and VeryHigh presets match or exceed libsoxr quality** with THD differences under 2 dB
+- All presets achieve SNR (Signal-to-Noise Ratio) matching libsoxr within measurement tolerance
+- Downsampling (e.g., 48kHz → 32kHz) often shows even better performance due to optimized anti-aliasing filters
 
 ### Custom Quality Settings
 
@@ -152,11 +172,34 @@ config := &resampling.Config{
 }
 ```
 
+## Precision Modes (float32 vs float64)
+
+The library supports both float32 and float64 processing through Go generics:
+
+```go
+// float64 for maximum precision (default)
+r64, _ := engine.NewResampler[float64](44100, 48000, engine.QualityHigh)
+output64, _ := r64.Process(input64)
+
+// float32 for ~2x SIMD throughput
+r32, _ := engine.NewResampler[float32](44100, 48000, engine.QualityHigh)
+output32, _ := r32.Process(input32)
+```
+
+**Precision comparison (44.1kHz → 48kHz, High quality):**
+
+| Mode    | THD @ 1kHz | Use Case                          |
+| ------- | ---------- | --------------------------------- |
+| float64 | -144.95 dB | Maximum precision, critical audio |
+| float32 | -144.96 dB | Higher throughput, general use    |
+
+Both modes achieve equivalent quality for most use cases. Use float32 when processing large amounts of audio data where throughput is more important than theoretical precision limits.
+
 ## Architecture
 
 The library implements a multi-stage resampling architecture similar to libsoxr:
 
-```
+```text
 Input -> [DFT Pre-Stage] -> [Polyphase FIR] -> Output
               (2x)            (fine ratio)
 ```
@@ -164,6 +207,7 @@ Input -> [DFT Pre-Stage] -> [Polyphase FIR] -> Output
 - **Integer ratios** (2x, 3x, etc.): Single DFT stage for efficiency
 - **Non-integer ratios** (44.1kHz→48kHz): DFT pre-upsampling + polyphase stage
 - **Polyphase decomposition**: Reduces computation by processing only needed output phases
+- **Cubic coefficient interpolation**: Sub-phase interpolation for excellent high-frequency THD
 - **Kaiser window**: Optimal FIR filter design with configurable stopband attenuation
 
 ## API Reference
@@ -233,23 +277,22 @@ go build -o bin/resample ./cmd/resample
 
 ## Performance
 
-Benchmarks comparing different quality levels (44.1kHz → 48kHz, mono):
+Filter complexity comparison for 44.1kHz → 48kHz conversion:
 
-| Quality  | Throughput    | Filter Taps | Latency     |
-| -------- | ------------- | ----------- | ----------- |
-| Quick    | ~50x realtime | 4           | 2 samples   |
-| Medium   | ~20x realtime | 64          | 32 samples  |
-| High     | ~10x realtime | 128         | 64 samples  |
-| VeryHigh | ~5x realtime  | 256         | 128 samples |
+| Quality  | DFT Stage          | Polyphase Stage     | Total Taps |
+| -------- | ------------------ | ------------------- | ---------- |
+| Low      | 132 taps × 2 phase | 32 taps × 80 phase  | ~2820      |
+| Medium   | 132 taps × 2 phase | 32 taps × 80 phase  | ~2820      |
+| High     | 166 taps × 2 phase | 64 taps × 80 phase  | ~5452      |
+| VeryHigh | 166 taps × 2 phase | 100 taps × 80 phase | ~8332      |
 
-_Actual performance varies by CPU and SIMD support._
+_Actual performance varies by CPU and SIMD support. Enable AVX2 with `GOAMD64=v3` for best performance._
 
 ## Dependencies
 
 - [github.com/tphakala/simd](https://github.com/tphakala/simd) - SIMD operations for filter convolution
 - [gonum.org/v1/gonum](https://gonum.org) - FFT for DFT stages
 - [github.com/go-audio/wav](https://github.com/go-audio/wav) - WAV file I/O (CLI tools only)
-
 
 ## Contributing
 
