@@ -3,12 +3,16 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/tphakala/go-audio-resampler.svg)](https://pkg.go.dev/github.com/tphakala/go-audio-resampler)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tphakala/go-audio-resampler)](https://goreportcard.com/report/github.com/tphakala/go-audio-resampler)
 
-High-quality audio resampling library for Go, based on [libsoxr](https://sourceforge.net/projects/soxr/) (the SoX Resampler library) by Rob Sykes.
+**Pure Go** high-quality audio resampling library with **no CGO dependencies**, based on [libsoxr](https://sourceforge.net/projects/soxr/) (the SoX Resampler library) by Rob Sykes.
+
+> **Cross-platform compatible** - Works on Linux, macOS, Windows, and any platform supported by Go. No C compiler or external libraries required.
 
 The library implements polyphase FIR filtering with Kaiser window design for professional-grade sample rate conversion, following the multi-stage architecture that makes libsoxr one of the highest-quality resamplers available.
 
 ## Features
 
+- **100% Pure Go** - No CGO, no external C libraries, no build complexity. Just `go get` and build anywhere
+- **Cross-platform** - Works on Linux, macOS, Windows, ARM, WebAssembly - anywhere Go runs
 - **Multiple quality presets** - From quick/low-latency to very high quality mastering (8-bit to 32-bit precision)
 - **Selectable precision** - Generic float32/float64 processing paths with type-safe SIMD operations
 - **Polyphase FIR filtering** - Efficient multi-stage resampling architecture with cubic coefficient interpolation
@@ -16,7 +20,6 @@ The library implements polyphase FIR filtering with Kaiser window design for pro
 - **SIMD acceleration** - AVX2/SSE optimizations via [tphakala/simd](https://github.com/tphakala/simd) for both float32 and float64
 - **Multi-channel support** - Process stereo, surround, and multi-channel audio (up to 256 channels)
 - **Streaming API** - Process audio in chunks with proper state management
-- **Pure Go** - No CGO dependencies, cross-platform compatible
 - **soxr-quality algorithms** - Implements libsoxr's multi-stage architecture for professional-grade quality
 
 ## Installation
