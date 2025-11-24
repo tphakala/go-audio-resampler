@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #include <soxr.h>
 #include <fftw3.h>
 
@@ -420,6 +421,61 @@ void measure_impulse(double input_rate, double output_rate) {
     free(output);
 }
 
+/* Measure throughput in samples per second */
+void measure_throughput(double input_rate, double output_rate, size_t num_samples, int iterations) {
+    /* Generate test signal (sine wave) */
+    double *input = malloc(num_samples * sizeof(double));
+    for (size_t i = 0; i < num_samples; i++) {
+        double phase = 2.0 * M_PI * 1000.0 * i / input_rate;
+        input[i] = 0.9 * sin(phase);
+    }
+
+    /* Warm up */
+    size_t warmup_len;
+    double *warmup = resample_soxr(input, num_samples, input_rate, output_rate, &warmup_len);
+    if (warmup) free(warmup);
+
+    /* Time multiple iterations */
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    size_t total_input_samples = 0;
+    size_t total_output_samples = 0;
+
+    for (int i = 0; i < iterations; i++) {
+        size_t output_len;
+        double *output = resample_soxr(input, num_samples, input_rate, output_rate, &output_len);
+        if (output) {
+            total_input_samples += num_samples;
+            total_output_samples += output_len;
+            free(output);
+        }
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    double elapsed_sec = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+    double input_samples_per_sec = total_input_samples / elapsed_sec;
+    double output_samples_per_sec = total_output_samples / elapsed_sec;
+    double megasamples_per_sec = input_samples_per_sec / 1e6;
+
+    printf("# Throughput Test Results\n");
+    printf("# =======================\n");
+    printf("# quality = %s\n", get_quality_name());
+    printf("# input_rate = %.0f\n", input_rate);
+    printf("# output_rate = %.0f\n", output_rate);
+    printf("# samples_per_iteration = %zu\n", num_samples);
+    printf("# iterations = %d\n", iterations);
+    printf("# total_input_samples = %zu\n", total_input_samples);
+    printf("# total_output_samples = %zu\n", total_output_samples);
+    printf("# elapsed_sec = %.6f\n", elapsed_sec);
+    printf("# input_samples_per_sec = %.0f\n", input_samples_per_sec);
+    printf("# output_samples_per_sec = %.0f\n", output_samples_per_sec);
+    printf("# megasamples_per_sec = %.3f\n", megasamples_per_sec);
+
+    free(input);
+}
+
 /* Parse quality string to preset */
 quality_preset_t parse_quality(const char *str) {
     if (strcmp(str, "quick") == 0 || strcmp(str, "0") == 0) return QUALITY_QUICK;
@@ -438,6 +494,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "  thd:1000     - THD at 1000 Hz\n");
         fprintf(stderr, "  snr:1000     - SNR with 1000 Hz tone\n");
         fprintf(stderr, "  impulse      - Impulse response analysis\n");
+        fprintf(stderr, "  throughput   - Throughput measurement (samples/sec)\n");
         fprintf(stderr, "\nQuality presets (optional, default=veryhigh):\n");
         fprintf(stderr, "  quick/0      - Quick (SOXR_QQ)\n");
         fprintf(stderr, "  low/1        - Low (SOXR_LQ)\n");
@@ -466,6 +523,10 @@ int main(int argc, char *argv[]) {
         measure_snr(input_rate, output_rate, test_freq);
     } else if (strcmp(test_type, "impulse") == 0) {
         measure_impulse(input_rate, output_rate);
+    } else if (strcmp(test_type, "throughput") == 0) {
+        /* Use 1 second of audio at input rate, 100 iterations */
+        size_t num_samples = (size_t)input_rate;
+        measure_throughput(input_rate, output_rate, num_samples, 100);
     } else {
         fprintf(stderr, "Unknown test type: %s\n", test_type);
         return 1;
