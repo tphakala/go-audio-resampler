@@ -4,13 +4,16 @@ import (
 	"math"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tphakala/go-audio-resampler/internal/mathutil"
+	"github.com/tphakala/go-audio-resampler/internal/testutil"
 )
 
 const (
 	// Test tolerances
 	defaultTolerance   = 1e-10
-	magnitudeTolerance = 1e-2 // For frequency response magnitude tests
+	magnitudeTolerance = 1e-2
 	windowTolerance    = 1e-10
 
 	// Test window parameters
@@ -57,18 +60,8 @@ func TestKaiserWindow_Symmetry(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			window := KaiserWindow(tt.length, tt.beta)
 
-			if len(window) != tt.length {
-				t.Errorf("window length = %d, want %d", len(window), tt.length)
-			}
-
-			// Check symmetry: w[i] = w[n-1-i]
-			for i := 0; i < tt.length/2; i++ {
-				j := tt.length - 1 - i
-				if math.Abs(window[i]-window[j]) > windowTolerance {
-					t.Errorf("window not symmetric at i=%d: w[%d]=%f, w[%d]=%f",
-						i, i, window[i], j, window[j])
-				}
-			}
+			assert.Len(t, window, tt.length, "window length mismatch")
+			testutil.AssertSymmetric(t, window, windowTolerance)
 		})
 	}
 }
@@ -77,22 +70,12 @@ func TestKaiserWindow_Symmetry(t *testing.T) {
 func TestKaiserWindow_CenterTap(t *testing.T) {
 	window := KaiserWindow(testWindowLength21, testBeta8)
 
-	centerIdx := testWindowLength21 / 2
-	centerValue := window[centerIdx]
-
-	// Center tap should be the maximum value (normalized to ~1.0)
-	for i, val := range window {
-		if val > centerValue {
-			t.Errorf("center tap is not maximum: w[%d]=%f > w[%d]=%f",
-				i, val, centerIdx, centerValue)
-		}
-	}
+	testutil.AssertCenterIsMax(t, window)
 
 	// Center value should be close to 1.0 (I₀(β)/I₀(β) = 1)
-	expectedCenter := 1.0
-	if math.Abs(centerValue-expectedCenter) > windowTolerance {
-		t.Errorf("center value = %f, want ~%f", centerValue, expectedCenter)
-	}
+	centerIdx := testWindowLength21 / 2
+	assert.InDelta(t, 1.0, window[centerIdx], windowTolerance,
+		"center value should be ~1.0")
 }
 
 // TestKaiserWindow_EdgeCases tests edge cases.
@@ -112,15 +95,12 @@ func TestKaiserWindow_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			window := KaiserWindow(tt.length, tt.beta)
-			if len(window) != tt.want {
-				t.Errorf("window length = %d, want %d", len(window), tt.want)
-			}
+			assert.Len(t, window, tt.want, "window length mismatch")
 
 			if tt.length == 1 && len(window) == 1 {
 				// Single tap should be 1.0
-				if math.Abs(window[0]-1.0) > windowTolerance {
-					t.Errorf("single tap value = %f, want 1.0", window[0])
-				}
+				assert.InDelta(t, 1.0, window[0], windowTolerance,
+					"single tap value should be 1.0")
 			}
 		})
 	}
@@ -208,8 +188,10 @@ func TestFilterParams_Validate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.params.Validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr {
+				assert.Error(t, err, "expected validation error")
+			} else {
+				assert.NoError(t, err, "unexpected validation error")
 			}
 		})
 	}
@@ -225,22 +207,10 @@ func TestDesignLowPassFilter_Symmetry(t *testing.T) {
 	}
 
 	filter, err := DesignLowPassFilter(params)
-	if err != nil {
-		t.Fatalf("DesignLowPassFilter() error = %v", err)
-	}
+	require.NoError(t, err, "DesignLowPassFilter failed")
 
-	if len(filter) != params.NumTaps {
-		t.Errorf("filter length = %d, want %d", len(filter), params.NumTaps)
-	}
-
-	// Check symmetry: h[i] = h[n-1-i]
-	for i := 0; i < len(filter)/2; i++ {
-		j := len(filter) - 1 - i
-		if math.Abs(filter[i]-filter[j]) > defaultTolerance {
-			t.Errorf("filter not symmetric at i=%d: h[%d]=%f, h[%d]=%f",
-				i, i, filter[i], j, filter[j])
-		}
-	}
+	assert.Len(t, filter, params.NumTaps, "filter length mismatch")
+	testutil.AssertSymmetric(t, filter, defaultTolerance)
 }
 
 // TestDesignLowPassFilter_DCGain verifies that DC gain equals target gain.
@@ -264,19 +234,9 @@ func TestDesignLowPassFilter_DCGain(t *testing.T) {
 			}
 
 			filter, err := DesignLowPassFilter(params)
-			if err != nil {
-				t.Fatalf("DesignLowPassFilter() error = %v", err)
-			}
+			require.NoError(t, err, "DesignLowPassFilter failed")
 
-			// Sum all coefficients to get DC gain
-			var sum float64
-			for _, coeff := range filter {
-				sum += coeff
-			}
-
-			if math.Abs(sum-tt.gain) > defaultTolerance {
-				t.Errorf("DC gain = %f, want %f", sum, tt.gain)
-			}
+			testutil.AssertDCGain(t, filter, tt.gain, defaultTolerance)
 		})
 	}
 }
@@ -292,16 +252,12 @@ func TestDesignLowPassFilter_FrequencyResponse(t *testing.T) {
 	)
 
 	filter, err := DesignLowPassFilterAuto(testCutoff, testTransition, testAtten, testGainUnity)
-	if err != nil {
-		t.Fatalf("DesignLowPassFilterAuto() error = %v", err)
-	}
+	require.NoError(t, err, "DesignLowPassFilterAuto failed")
 
 	// Compute frequency response
 	response := ComputeFrequencyResponse(filter, testNumPoints512)
 
-	if len(response.Frequencies) != testNumPoints512 {
-		t.Errorf("response length = %d, want %d", len(response.Frequencies), testNumPoints512)
-	}
+	assert.Len(t, response.Frequencies, testNumPoints512, "response length mismatch")
 
 	// Check passband (0 to cutoff - transition/2)
 	passbandEnd := testCutoff - testTransition/2.0
@@ -314,10 +270,9 @@ func TestDesignLowPassFilter_FrequencyResponse(t *testing.T) {
 		mag := response.Magnitude[i]
 		magDB := MagnitudeDB(mag)
 
-		if math.Abs(magDB) > passbandRippleDB {
-			t.Errorf("passband ripple at freq=%f: %f dB (want < %f dB)",
-				freq, magDB, passbandRippleDB)
-		}
+		assert.LessOrEqual(t, math.Abs(magDB), passbandRippleDB,
+			"passband ripple at freq=%f: %f dB exceeds %f dB",
+			freq, magDB, passbandRippleDB)
 	}
 
 	// Check stopband (cutoff + transition/2 to Nyquist)
@@ -335,10 +290,9 @@ func TestDesignLowPassFilter_FrequencyResponse(t *testing.T) {
 		mag := response.Magnitude[i]
 		magDB := MagnitudeDB(mag)
 
-		if magDB > stopbandTarget {
-			t.Errorf("insufficient stopband attenuation at freq=%f: %f dB (want < %f dB)",
-				freq, magDB, stopbandTarget)
-		}
+		assert.LessOrEqual(t, magDB, stopbandTarget,
+			"insufficient stopband attenuation at freq=%f: %f dB exceeds %f dB",
+			freq, magDB, stopbandTarget)
 	}
 }
 
@@ -364,19 +318,13 @@ func TestDesignLowPassFilter_HigherAttenuation(t *testing.T) {
 			}
 
 			filter, err := DesignLowPassFilter(params)
-			if err != nil {
-				t.Fatalf("DesignLowPassFilter() error = %v", err)
-			}
+			require.NoError(t, err, "DesignLowPassFilter failed")
 
-			if len(filter) != tt.numTaps {
-				t.Errorf("filter length = %d, want %d", len(filter), tt.numTaps)
-			}
+			assert.Len(t, filter, tt.numTaps, "filter length mismatch")
 
 			// Verify beta parameter is reasonable
 			beta := mathutil.KaiserBeta(tt.attenuation)
-			if beta <= 0 {
-				t.Errorf("beta = %f, want > 0", beta)
-			}
+			assert.Positive(t, beta, "beta should be > 0")
 		})
 	}
 }
@@ -398,34 +346,16 @@ func TestDesignLowPassFilterAuto(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			filter, err := DesignLowPassFilterAuto(tt.cutoffFreq, tt.transitionBW, tt.attenuation, tt.gain)
-			if err != nil {
-				t.Fatalf("DesignLowPassFilterAuto() error = %v", err)
-			}
+			require.NoError(t, err, "DesignLowPassFilterAuto failed")
 
 			// Filter should have odd length (symmetric FIR)
-			if len(filter)%2 == 0 {
-				t.Errorf("filter length = %d, want odd number", len(filter))
-			}
+			testutil.AssertOddLength(t, filter)
 
 			// Verify DC gain
-			var sum float64
-			for _, coeff := range filter {
-				sum += coeff
-			}
-
-			if math.Abs(sum-tt.gain) > defaultTolerance {
-				t.Errorf("DC gain = %f, want %f", sum, tt.gain)
-			}
+			testutil.AssertDCGain(t, filter, tt.gain, defaultTolerance)
 
 			// Verify symmetry
-			n := len(filter)
-			for i := 0; i < n/2; i++ {
-				j := n - 1 - i
-				if math.Abs(filter[i]-filter[j]) > defaultTolerance {
-					t.Errorf("filter not symmetric at i=%d", i)
-					break
-				}
-			}
+			testutil.AssertSymmetric(t, filter, defaultTolerance)
 		})
 	}
 }
@@ -442,31 +372,21 @@ func TestComputeFrequencyResponse(t *testing.T) {
 
 	response := ComputeFrequencyResponse(coeffs, testNumPoints512)
 
-	if len(response.Frequencies) != testNumPoints512 {
-		t.Errorf("frequencies length = %d, want %d", len(response.Frequencies), testNumPoints512)
-	}
-
-	if len(response.Magnitude) != testNumPoints512 {
-		t.Errorf("magnitude length = %d, want %d", len(response.Magnitude), testNumPoints512)
-	}
-
-	if len(response.Phase) != testNumPoints512 {
-		t.Errorf("phase length = %d, want %d", len(response.Phase), testNumPoints512)
-	}
+	assert.Len(t, response.Frequencies, testNumPoints512, "frequencies length mismatch")
+	assert.Len(t, response.Magnitude, testNumPoints512, "magnitude length mismatch")
+	assert.Len(t, response.Phase, testNumPoints512, "phase length mismatch")
 
 	// DC response (freq=0) should equal sum of coefficients
 	expectedDC := tap0 + tap1 + tap2
-	if math.Abs(response.Magnitude[0]-expectedDC) > magnitudeTolerance {
-		t.Errorf("DC magnitude = %f, want %f", response.Magnitude[0], expectedDC)
-	}
+	assert.InDelta(t, expectedDC, response.Magnitude[0], magnitudeTolerance,
+		"DC magnitude mismatch")
 
 	// Nyquist response (freq=0.5) for this filter should be zero
 	// because [0.25, 0.5, 0.25] alternating signs = 0.25 - 0.5 + 0.25 = 0
 	nyquistIdx := testNumPoints512 - 1
 	nyquistMag := response.Magnitude[nyquistIdx]
-	if nyquistMag > magnitudeTolerance {
-		t.Errorf("Nyquist magnitude = %f, want ~0", nyquistMag)
-	}
+	assert.LessOrEqual(t, nyquistMag, magnitudeTolerance,
+		"Nyquist magnitude should be ~0")
 }
 
 // TestMagnitudeDB tests linear to dB conversion.
@@ -500,9 +420,8 @@ func TestMagnitudeDB(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := MagnitudeDB(tt.mag)
-			if math.Abs(got-tt.want) > dbTolerance {
-				t.Errorf("MagnitudeDB(%f) = %f dB, want %f dB", tt.mag, got, tt.want)
-			}
+			assert.InDelta(t, tt.want, got, dbTolerance,
+				"MagnitudeDB(%f) = %f dB, want %f dB", tt.mag, got, tt.want)
 		})
 	}
 }

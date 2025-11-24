@@ -1,11 +1,13 @@
 package mathutil
 
 import (
-	"math"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/tphakala/go-audio-resampler/internal/testutil"
 )
 
-// Test BesselI0 against known values
+// TestBesselI0 tests BesselI0 against known values.
 func TestBesselI0(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -14,15 +16,15 @@ func TestBesselI0(t *testing.T) {
 		tolerance float64
 	}{
 		{"Zero", 0.0, 1.0, 1e-15},
-		{"Small positive", 0.5, 1.063483344, 1e-7}, // Adjusted for practical precision
+		{"Small positive", 0.5, 1.063483344, 1e-7},
 		{"One", 1.0, 1.266065848, 1e-7},
 		{"Two", 2.0, 2.279585307, 1e-7},
 		{"Three", 3.0, 4.880792565, 1e-7},
-		{"Boundary 3.75", 3.75, 9.118945994, 1e-7}, // Corrected value at boundary
+		{"Boundary 3.75", 3.75, 9.118945994, 1e-7},
 		{"Four", 4.0, 11.30192217, 1e-7},
 		{"Five", 5.0, 27.23987183, 1e-7},
 		{"Ten", 10.0, 2815.716628, 1e-6},
-		{"Twenty", 20.0, 4.355826e7, 1e-1}, // Large value, lower precision OK
+		{"Twenty", 20.0, 4.355826e7, 1e-1},
 		{"Small negative", -0.5, 1.063483344, 1e-7},
 		{"Negative one", -1.0, 1.266065848, 1e-7},
 	}
@@ -30,51 +32,41 @@ func TestBesselI0(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := BesselI0(tt.x)
-			relError := math.Abs(result-tt.expected) / tt.expected
-			if relError > tt.tolerance {
-				t.Errorf("BesselI0(%v) = %v, want %v (rel error: %e)",
-					tt.x, result, tt.expected, relError)
-			}
+			testutil.AssertRelativeError(t, tt.expected, result, tt.tolerance)
 		})
 	}
 }
 
-// Test I₀(x) = I₀(-x) (even function property)
+// TestBesselI0_Symmetry tests I₀(x) = I₀(-x) (even function property).
 func TestBesselI0_Symmetry(t *testing.T) {
 	testValues := []float64{0.1, 1.0, 2.5, 5.0, 10.0}
 
 	for _, x := range testValues {
 		pos := BesselI0(x)
 		neg := BesselI0(-x)
-		if math.Abs(pos-neg) > 1e-10 {
-			t.Errorf("BesselI0 not symmetric: I₀(%v)=%v, I₀(%v)=%v",
-				x, pos, -x, neg)
-		}
+		assert.InDelta(t, pos, neg, 1e-10,
+			"BesselI0 not symmetric: I₀(%v)=%v, I₀(%v)=%v", x, pos, -x, neg)
 	}
 }
 
-// Test I₀(0) = 1
+// TestBesselI0_AtZero tests I₀(0) = 1.
 func TestBesselI0_AtZero(t *testing.T) {
 	result := BesselI0(0)
-	if math.Abs(result-1.0) > 1e-15 {
-		t.Errorf("BesselI0(0) = %v, want 1.0", result)
-	}
+	assert.InDelta(t, 1.0, result, 1e-15, "BesselI0(0) should be 1.0")
 }
 
-// Test I₀(x) is monotonically increasing for x > 0
+// TestBesselI0_Monotonic tests I₀(x) is monotonically increasing for x > 0.
 func TestBesselI0_Monotonic(t *testing.T) {
 	prev := BesselI0(0)
 	for x := 0.1; x < 10.0; x += 0.1 {
 		curr := BesselI0(x)
-		if curr <= prev {
-			t.Errorf("BesselI0 not monotonically increasing at x=%v: %v <= %v",
-				x, curr, prev)
-		}
+		assert.Greater(t, curr, prev,
+			"BesselI0 not monotonically increasing at x=%v: %v <= %v", x, curr, prev)
 		prev = curr
 	}
 }
 
-// Benchmark BesselI0 for performance
+// BenchmarkBesselI0_Small benchmarks BesselI0 for small values.
 func BenchmarkBesselI0_Small(b *testing.B) {
 	x := 1.5
 	for b.Loop() {
@@ -82,6 +74,7 @@ func BenchmarkBesselI0_Small(b *testing.B) {
 	}
 }
 
+// BenchmarkBesselI0_Large benchmarks BesselI0 for large values.
 func BenchmarkBesselI0_Large(b *testing.B) {
 	x := 10.0
 	for b.Loop() {
@@ -89,7 +82,7 @@ func BenchmarkBesselI0_Large(b *testing.B) {
 	}
 }
 
-// Test KaiserBeta calculation
+// TestKaiserBeta tests Kaiser beta calculation.
 func TestKaiserBeta(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -108,28 +101,23 @@ func TestKaiserBeta(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			beta := KaiserBeta(tt.attenuation)
-			if beta < tt.expectedMin || beta > tt.expectedMax {
-				t.Errorf("KaiserBeta(%v) = %v, want between %v and %v",
-					tt.attenuation, beta, tt.expectedMin, tt.expectedMax)
-			}
+			testutil.AssertInRange(t, beta, tt.expectedMin, tt.expectedMax)
 		})
 	}
 }
 
-// Test KaiserBeta is monotonically increasing
+// TestKaiserBeta_Monotonic tests KaiserBeta is monotonically increasing.
 func TestKaiserBeta_Monotonic(t *testing.T) {
 	prevBeta := KaiserBeta(20.0)
 	for att := 25.0; att <= 150.0; att += 5.0 {
 		beta := KaiserBeta(att)
-		if beta < prevBeta {
-			t.Errorf("KaiserBeta not monotonic at att=%v: %v < %v",
-				att, beta, prevBeta)
-		}
+		assert.GreaterOrEqual(t, beta, prevBeta,
+			"KaiserBeta not monotonic at att=%v: %v < %v", att, beta, prevBeta)
 		prevBeta = beta
 	}
 }
 
-// Test KaiserAttenuation is approximately inverse of KaiserBeta
+// TestKaiserAttenuation_Inverse tests KaiserAttenuation is approximately inverse of KaiserBeta.
 func TestKaiserAttenuation_Inverse(t *testing.T) {
 	attenuations := []float64{60.0, 80.0, 100.0, 120.0}
 
@@ -138,15 +126,11 @@ func TestKaiserAttenuation_Inverse(t *testing.T) {
 		recoveredAtt := KaiserAttenuation(beta)
 
 		// Should be within 5% for high attenuations
-		relError := math.Abs(recoveredAtt-origAtt) / origAtt
-		if relError > 0.05 {
-			t.Errorf("KaiserAttenuation not inverse: att=%v -> beta=%v -> att=%v (error: %.2f%%)",
-				origAtt, beta, recoveredAtt, relError*100)
-		}
+		testutil.AssertRelativeError(t, origAtt, recoveredAtt, 0.05)
 	}
 }
 
-// Test EstimateFilterLength produces reasonable results
+// TestEstimateFilterLength tests that EstimateFilterLength produces reasonable results.
 func TestEstimateFilterLength(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -166,55 +150,47 @@ func TestEstimateFilterLength(t *testing.T) {
 			taps := EstimateFilterLength(tt.attenuation, tt.transitionBW)
 
 			// Should be odd
-			if taps%2 == 0 {
-				t.Errorf("Filter length not odd: %d", taps)
-			}
+			assert.Equal(t, 1, taps%2, "Filter length should be odd: %d", taps)
 
 			// Should be in reasonable range
-			if taps < tt.minTaps || taps > tt.maxTaps {
-				t.Errorf("EstimateFilterLength(%v, %v) = %d, want between %d and %d",
-					tt.attenuation, tt.transitionBW, taps, tt.minTaps, tt.maxTaps)
-			}
+			assert.GreaterOrEqual(t, taps, tt.minTaps,
+				"Filter length %d below minimum %d", taps, tt.minTaps)
+			assert.LessOrEqual(t, taps, tt.maxTaps,
+				"Filter length %d exceeds maximum %d", taps, tt.maxTaps)
 		})
 	}
 }
 
-// Test EstimateFilterLength edge cases
+// TestEstimateFilterLength_EdgeCases tests EstimateFilterLength edge cases.
 func TestEstimateFilterLength_EdgeCases(t *testing.T) {
 	// Zero transition bandwidth should not crash
 	taps := EstimateFilterLength(100.0, 0.0)
-	if taps < 3 {
-		t.Errorf("Filter length too small for edge case: %d", taps)
-	}
+	assert.GreaterOrEqual(t, taps, 3, "Filter length too small for edge case: %d", taps)
 
 	// Very small attenuation
 	taps = EstimateFilterLength(10.0, 0.1)
-	if taps < 3 {
-		t.Errorf("Filter length too small for low attenuation: %d", taps)
-	}
+	assert.GreaterOrEqual(t, taps, 3, "Filter length too small for low attenuation: %d", taps)
 
 	// Very high attenuation with narrow transition
 	taps = EstimateFilterLength(200.0, 0.001)
-	if taps > 8191 {
-		t.Errorf("Filter length exceeds maximum: %d", taps)
-	}
+	assert.LessOrEqual(t, taps, 8191, "Filter length exceeds maximum: %d", taps)
 }
 
-// Benchmark KaiserBeta
+// BenchmarkKaiserBeta benchmarks KaiserBeta.
 func BenchmarkKaiserBeta(b *testing.B) {
 	for b.Loop() {
 		_ = KaiserBeta(100.0)
 	}
 }
 
-// Benchmark EstimateFilterLength
+// BenchmarkEstimateFilterLength benchmarks EstimateFilterLength.
 func BenchmarkEstimateFilterLength(b *testing.B) {
 	for b.Loop() {
 		_ = EstimateFilterLength(120.0, 0.05)
 	}
 }
 
-// Test BesselI1 (internal function) against known values
+// TestBesselI1 tests BesselI1 (internal function) against known values.
 func TestBesselI1(t *testing.T) {
 	tests := []struct {
 		x         float64
@@ -230,27 +206,24 @@ func TestBesselI1(t *testing.T) {
 
 	for _, tt := range tests {
 		result := besselI1(tt.x)
-		if math.Abs(result-tt.expected) > tt.tolerance {
-			t.Errorf("besselI1(%v) = %v, want %v", tt.x, result, tt.expected)
-		}
+		assert.InDelta(t, tt.expected, result, tt.tolerance,
+			"besselI1(%v) = %v, want %v", tt.x, result, tt.expected)
 	}
 }
 
-// Test I₁(-x) = -I₁(x) (odd function property)
+// TestBesselI1_Antisymmetry tests I₁(-x) = -I₁(x) (odd function property).
 func TestBesselI1_Antisymmetry(t *testing.T) {
 	testValues := []float64{0.1, 1.0, 2.5, 5.0}
 
 	for _, x := range testValues {
 		pos := besselI1(x)
 		neg := besselI1(-x)
-		if math.Abs(pos+neg) > 1e-10 {
-			t.Errorf("besselI1 not antisymmetric: I₁(%v)=%v, I₁(%v)=%v",
-				x, pos, -x, neg)
-		}
+		assert.InDelta(t, -pos, neg, 1e-10,
+			"besselI1 not antisymmetric: I₁(%v)=%v, I₁(%v)=%v", x, pos, -x, neg)
 	}
 }
 
-// Test BesselI0Ratio
+// TestBesselI0Ratio tests BesselI0Ratio.
 func TestBesselI0Ratio(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -269,9 +242,8 @@ func TestBesselI0Ratio(t *testing.T) {
 			ratio := BesselI0Ratio(tt.x)
 
 			// Should be in range (0, 1)
-			if ratio <= 0 || ratio >= 1 {
-				t.Errorf("BesselI0Ratio(%v) = %v, should be in (0,1)", tt.x, ratio)
-			}
+			assert.Greater(t, ratio, 0.0, "BesselI0Ratio(%v) should be > 0", tt.x)
+			assert.Less(t, ratio, 1.0, "BesselI0Ratio(%v) should be < 1", tt.x)
 
 			// Verify by computing I₁/I₀ directly (except for very large x)
 			if tt.x < 50 {
@@ -279,11 +251,7 @@ func TestBesselI0Ratio(t *testing.T) {
 				i1 := besselI1(tt.x)
 				expected := i1 / i0
 
-				relError := math.Abs(ratio-expected) / expected
-				if relError > tt.tolerance {
-					t.Errorf("BesselI0Ratio(%v) = %v, want %v (rel error: %e)",
-						tt.x, ratio, expected, relError)
-				}
+				testutil.AssertRelativeError(t, expected, ratio, tt.tolerance)
 			}
 		})
 	}

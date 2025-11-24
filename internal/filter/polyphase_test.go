@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"math"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/tphakala/go-audio-resampler/internal/testutil"
 )
 
 const (
@@ -103,8 +107,10 @@ func TestPolyphaseParams_Validate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.params.Validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr {
+				assert.Error(t, err, "expected validation error")
+			} else {
+				assert.NoError(t, err, "unexpected validation error")
 			}
 		})
 	}
@@ -122,32 +128,17 @@ func TestDesignPolyphaseFilterBank(t *testing.T) {
 	}
 
 	pfb, err := DesignPolyphaseFilterBank(params)
-	if err != nil {
-		t.Fatalf("DesignPolyphaseFilterBank() error = %v", err)
-	}
+	require.NoError(t, err, "DesignPolyphaseFilterBank failed")
 
 	// Check basic properties
-	if pfb.NumPhases != params.NumPhases {
-		t.Errorf("NumPhases = %d, want %d", pfb.NumPhases, params.NumPhases)
-	}
-
-	if pfb.InterpOrder != params.InterpOrder {
-		t.Errorf("InterpOrder = %d, want %d", pfb.InterpOrder, params.InterpOrder)
-	}
-
-	if pfb.TotalTaps <= 0 {
-		t.Errorf("TotalTaps = %d, want > 0", pfb.TotalTaps)
-	}
-
-	if pfb.TapsPerPhase <= 0 {
-		t.Errorf("TapsPerPhase = %d, want > 0", pfb.TapsPerPhase)
-	}
+	assert.Equal(t, params.NumPhases, pfb.NumPhases, "NumPhases mismatch")
+	assert.Equal(t, params.InterpOrder, pfb.InterpOrder, "InterpOrder mismatch")
+	assert.Positive(t, pfb.TotalTaps, "TotalTaps should be > 0")
+	assert.Positive(t, pfb.TapsPerPhase, "TapsPerPhase should be > 0")
 
 	// Check coefficient storage size
 	expectedCoeffs := pfb.TapsPerPhase * pfb.NumPhases * (int(pfb.InterpOrder) + 1)
-	if len(pfb.Coeffs) != expectedCoeffs {
-		t.Errorf("Coeffs length = %d, want %d", len(pfb.Coeffs), expectedCoeffs)
-	}
+	assert.Len(t, pfb.Coeffs, expectedCoeffs, "Coeffs length mismatch")
 }
 
 // TestPolyphaseFilterBank_InterpolationOrders tests all interpolation orders.
@@ -173,16 +164,12 @@ func TestPolyphaseFilterBank_InterpolationOrders(t *testing.T) {
 			}
 
 			pfb, err := DesignPolyphaseFilterBank(params)
-			if err != nil {
-				t.Fatalf("DesignPolyphaseFilterBank() error = %v", err)
-			}
+			require.NoError(t, err, "DesignPolyphaseFilterBank failed")
 
 			// Verify coefficient storage
 			coeffsPerTap := int(ord.order) + 1
 			expectedSize := pfb.TapsPerPhase * pfb.NumPhases * coeffsPerTap
-			if len(pfb.Coeffs) != expectedSize {
-				t.Errorf("Coeffs length = %d, want %d", len(pfb.Coeffs), expectedSize)
-			}
+			assert.Len(t, pfb.Coeffs, expectedSize, "Coeffs length mismatch")
 		})
 	}
 }
@@ -199,9 +186,7 @@ func TestPolyphaseFilterBank_GetCoefficient(t *testing.T) {
 	}
 
 	pfb, err := DesignPolyphaseFilterBank(params)
-	if err != nil {
-		t.Fatalf("DesignPolyphaseFilterBank() error = %v", err)
-	}
+	require.NoError(t, err, "DesignPolyphaseFilterBank failed")
 
 	// Test coefficient retrieval
 	tap := 0
@@ -209,28 +194,22 @@ func TestPolyphaseFilterBank_GetCoefficient(t *testing.T) {
 
 	// At frac = 0, should return base coefficient
 	coef0 := pfb.GetCoefficient(tap, phase, 0.0)
-	if math.IsNaN(coef0) {
-		t.Error("GetCoefficient returned NaN for frac=0")
-	}
+	assert.False(t, math.IsNaN(coef0), "GetCoefficient returned NaN for frac=0")
 
 	// At frac = 1, should approach next phase
 	coef1 := pfb.GetCoefficient(tap, phase, 1.0)
-	if math.IsNaN(coef1) {
-		t.Error("GetCoefficient returned NaN for frac=1")
-	}
+	assert.False(t, math.IsNaN(coef1), "GetCoefficient returned NaN for frac=1")
 
 	// With linear interpolation, frac=0.5 should be average of endpoints
 	coef0_5 := pfb.GetCoefficient(tap, phase, 0.5)
-	if math.IsNaN(coef0_5) {
-		t.Error("GetCoefficient returned NaN for frac=0.5")
-	}
+	assert.False(t, math.IsNaN(coef0_5), "GetCoefficient returned NaN for frac=0.5")
 
 	// For linear interpolation, midpoint should satisfy interpolation property
 	// This is a basic sanity check, not a strict equality test
-	if math.Abs(coef0_5) > math.Max(math.Abs(coef0), math.Abs(coef1))*2 {
-		t.Errorf("Interpolated coefficient suspiciously large: %f (endpoints: %f, %f)",
-			coef0_5, coef0, coef1)
-	}
+	maxEndpoint := math.Max(math.Abs(coef0), math.Abs(coef1)) * 2
+	assert.LessOrEqual(t, math.Abs(coef0_5), maxEndpoint,
+		"Interpolated coefficient suspiciously large: %f (endpoints: %f, %f)",
+		coef0_5, coef0, coef1)
 }
 
 // TestPolyphaseFilterBank_Structure tests that the filter bank has valid structure.
@@ -247,32 +226,20 @@ func TestPolyphaseFilterBank_Structure(t *testing.T) {
 	}
 
 	pfb, err := DesignPolyphaseFilterBank(params)
-	if err != nil {
-		t.Fatalf("DesignPolyphaseFilterBank() error = %v", err)
-	}
+	require.NoError(t, err, "DesignPolyphaseFilterBank failed")
 
 	// Verify structure is consistent
-	if pfb.NumPhases != params.NumPhases {
-		t.Errorf("NumPhases = %d, want %d", pfb.NumPhases, params.NumPhases)
-	}
+	assert.Equal(t, params.NumPhases, pfb.NumPhases, "NumPhases mismatch")
 
 	// Verify minimum taps per phase
-	if pfb.TapsPerPhase < 2 {
-		t.Errorf("TapsPerPhase = %d, want at least 2", pfb.TapsPerPhase)
-	}
+	assert.GreaterOrEqual(t, pfb.TapsPerPhase, 2, "TapsPerPhase should be at least 2")
 
 	// Verify coefficient storage size
 	expectedCoeffs := pfb.TapsPerPhase * pfb.NumPhases * (int(pfb.InterpOrder) + 1)
-	if len(pfb.Coeffs) != expectedCoeffs {
-		t.Errorf("Coeffs length = %d, want %d", len(pfb.Coeffs), expectedCoeffs)
-	}
+	assert.Len(t, pfb.Coeffs, expectedCoeffs, "Coeffs length mismatch")
 
 	// Verify all coefficients are valid (not NaN or Inf)
-	for i, c := range pfb.Coeffs {
-		if math.IsNaN(c) || math.IsInf(c, 0) {
-			t.Errorf("Invalid coefficient at index %d: %f", i, c)
-		}
-	}
+	testutil.AssertNoNaNOrInf(t, pfb.Coeffs)
 
 	t.Logf("Filter bank: %d phases, %d taps/phase, %d total coefficients",
 		pfb.NumPhases, pfb.TapsPerPhase, len(pfb.Coeffs))
@@ -292,9 +259,7 @@ func TestPolyphaseFilterBank_DCGain(t *testing.T) {
 	}
 
 	pfb, err := DesignPolyphaseFilterBank(params)
-	if err != nil {
-		t.Fatalf("DesignPolyphaseFilterBank() error = %v", err)
-	}
+	require.NoError(t, err, "DesignPolyphaseFilterBank failed")
 
 	// Check DC gain across multiple phases (soxr-style: each phase ≈ 1.0)
 	// The average DC gain across all phases should be approximately 1.0
@@ -312,9 +277,8 @@ func TestPolyphaseFilterBank_DCGain(t *testing.T) {
 
 	// Allow some tolerance for filter design imprecision
 	tolerance := 0.5 // Wider tolerance for average across all phases
-	if math.Abs(avgDCGain-expectedGain) > tolerance {
-		t.Errorf("Average DC gain = %f, want %f (tolerance: %f)", avgDCGain, expectedGain, tolerance)
-	}
+	assert.InDelta(t, expectedGain, avgDCGain, tolerance,
+		"Average DC gain mismatch")
 	t.Logf("Average DC gain across %d phases: %.6f", pfb.NumPhases, avgDCGain)
 }
 
@@ -334,20 +298,14 @@ func TestPolyphaseFilterBank_DifferentPhases(t *testing.T) {
 			}
 
 			pfb, err := DesignPolyphaseFilterBank(params)
-			if err != nil {
-				t.Fatalf("DesignPolyphaseFilterBank() error = %v", err)
-			}
+			require.NoError(t, err, "DesignPolyphaseFilterBank failed")
 
-			if pfb.NumPhases != numPhases {
-				t.Errorf("NumPhases = %d, want %d", pfb.NumPhases, numPhases)
-			}
+			assert.Equal(t, numPhases, pfb.NumPhases, "NumPhases mismatch")
 
 			// Verify we have coefficients for all phases
 			coeffsPerTap := int(pfb.InterpOrder) + 1
 			expectedSize := pfb.TapsPerPhase * numPhases * coeffsPerTap
-			if len(pfb.Coeffs) != expectedSize {
-				t.Errorf("Coeffs length = %d, want %d", len(pfb.Coeffs), expectedSize)
-			}
+			assert.Len(t, pfb.Coeffs, expectedSize, "Coeffs length mismatch")
 		})
 	}
 }
@@ -364,29 +322,19 @@ func TestPolyphaseFilterBank_FrequencyResponse(t *testing.T) {
 	}
 
 	pfb, err := DesignPolyphaseFilterBank(params)
-	if err != nil {
-		t.Fatalf("DesignPolyphaseFilterBank() error = %v", err)
-	}
+	require.NoError(t, err, "DesignPolyphaseFilterBank failed")
 
 	response := pfb.ComputeFrequencyResponse(testNumPoints512)
 
-	if len(response.Frequencies) != testNumPoints512 {
-		t.Errorf("response length = %d, want %d", len(response.Frequencies), testNumPoints512)
-	}
+	assert.Len(t, response.Frequencies, testNumPoints512, "response length mismatch")
 
 	// Check that DC response is reasonable
 	dcMagnitude := response.Magnitude[0]
-	if dcMagnitude <= 0 || math.IsNaN(dcMagnitude) {
-		t.Errorf("DC magnitude = %f, want > 0", dcMagnitude)
-	}
+	assert.Positive(t, dcMagnitude, "DC magnitude should be > 0")
+	assert.False(t, math.IsNaN(dcMagnitude), "DC magnitude should not be NaN")
 
 	// Check that frequencies are in expected range [0, 0.5]
-	for i, freq := range response.Frequencies {
-		if freq < 0 || freq > 0.5 {
-			t.Errorf("frequency[%d] = %f, want in range [0, 0.5]", i, freq)
-			break
-		}
-	}
+	testutil.AssertAllInRange(t, response.Frequencies, 0, 0.5)
 }
 
 // TestPolyphaseFilterBank_MemoryUsage tests memory usage calculation.
@@ -401,17 +349,13 @@ func TestPolyphaseFilterBank_MemoryUsage(t *testing.T) {
 	}
 
 	pfb, err := DesignPolyphaseFilterBank(params)
-	if err != nil {
-		t.Fatalf("DesignPolyphaseFilterBank() error = %v", err)
-	}
+	require.NoError(t, err, "DesignPolyphaseFilterBank failed")
 
 	memUsage := pfb.GetMemoryUsage()
 	const bytesPerFloat64 = 8
 	expectedUsage := int64(len(pfb.Coeffs)) * bytesPerFloat64
 
-	if memUsage != expectedUsage {
-		t.Errorf("GetMemoryUsage() = %d, want %d", memUsage, expectedUsage)
-	}
+	assert.Equal(t, expectedUsage, memUsage, "GetMemoryUsage mismatch")
 }
 
 // BenchmarkDesignPolyphaseFilterBank benchmarks filter bank design.
