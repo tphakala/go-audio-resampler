@@ -68,24 +68,28 @@ func buildPipeline(config *Config, ratio float64) (*Pipeline, error) {
 }
 
 // createStage creates a Stage implementation based on the specification.
+// The config.Quality.Precision is passed to all filter stages to ensure
+// consistent quality throughout the pipeline.
 func createStage(spec StageSpec, config *Config) (Stage, error) {
+	precision := config.Quality.Precision
+
 	switch spec.Type {
 	case pipeline.StageCubic:
 		return newCubicStage(spec.Ratio), nil
 
 	case pipeline.StageHalfBand:
-		return newHalfBandStage(spec.Ratio, spec.FilterLength), nil
+		return newHalfBandStage(spec.Ratio, spec.FilterLength, precision), nil
 
 	case pipeline.StagePolyphase:
 		return newPolyphaseStage(
 			spec.Ratio,
 			spec.FilterLength,
 			spec.Phases,
-			config.Quality.Precision,
+			precision,
 		)
 
 	case pipeline.StageFFT:
-		return newFFTStage(spec.Ratio, spec.FilterLength, config.Quality.Precision)
+		return newFFTStage(spec.Ratio, spec.FilterLength, precision)
 
 	default:
 		return nil, fmt.Errorf("unsupported stage type: %v", spec.Type)

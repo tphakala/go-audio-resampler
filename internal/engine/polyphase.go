@@ -1370,23 +1370,40 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, ha
 	// From soxr: num_taps = ceil(att/tr_bw + 1)
 	const (
 		minTapsPerPhase = 8
-		maxTapsPerPhase = 64
-		maxTotalTaps    = 8000     // Target maximum (for Kaiser formula calculation)
 		filterLibLimit  = 8191 - 1 // Hard limit from filter library (minus 1 for safety)
 		minAtten        = 80.0
+
+		// Scale max taps per phase with attenuation to respect quality differences.
+		// These thresholds allow higher quality to use more taps.
+		lowQualityAttenuation     = 110.0 // ~16-bit, ~102 dB
+		highQualityAttenuation    = 130.0 // ~20-bit, ~126 dB
+		veryHighQualityAttenuation = 160.0 // ~28-bit, ~175 dB
+
+		maxTapsLowQuality      = 32  // Max taps per phase for low quality
+		maxTapsHighQuality     = 64  // Max taps per phase for high quality
+		maxTapsVeryHighQuality = 100 // Max taps per phase for very high quality
 	)
 
-	effectiveAtten := attenuation
-	idealTaps := int(math.Ceil(attenuation/params.TrBw + 1))
-
-	if idealTaps > maxTotalTaps {
-		effectiveAtten = float64(maxTotalTaps-1) * params.TrBw
-		if effectiveAtten < minAtten {
-			effectiveAtten = minAtten
-		}
+	// Determine max taps per phase based on attenuation (quality level)
+	var maxTapsPerPhase int
+	switch {
+	case attenuation < lowQualityAttenuation:
+		maxTapsPerPhase = maxTapsLowQuality
+	case attenuation < highQualityAttenuation:
+		maxTapsPerPhase = maxTapsHighQuality
+	case attenuation < veryHighQualityAttenuation:
+		maxTapsPerPhase = maxTapsVeryHighQuality
+	default:
+		// For very high quality (>160 dB), allow even more taps
+		// but still respect the filter library limit
+		maxTapsPerPhase = (filterLibLimit + 1) / numPhases
 	}
 
-	params.TotalTaps = int(math.Ceil(effectiveAtten/params.TrBw + 1))
+	// Calculate ideal taps from Kaiser formula
+	idealTaps := int(math.Ceil(attenuation/params.TrBw + 1))
+
+	// Compute taps per phase, respecting the quality-dependent limit
+	params.TotalTaps = idealTaps
 	params.TapsPerPhase = (params.TotalTaps + numPhases - 1) / numPhases
 
 	if params.TapsPerPhase < minTapsPerPhase {
