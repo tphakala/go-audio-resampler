@@ -162,6 +162,136 @@ func TestLsxInvFResp_MonotonicBehavior(t *testing.T) {
 }
 
 // =============================================================================
+// Unit Tests for ComputePolyphaseFilterParams (Fn Normalization)
+// =============================================================================
+
+// TestComputePolyphaseFilterParams_FnNormalization tests that the Fn normalization
+// is correctly applied for upsampling vs downsampling.
+func TestComputePolyphaseFilterParams_FnNormalization(t *testing.T) {
+	const attenuation = 126.0 // QualityHigh
+
+	testCases := []struct {
+		name         string
+		numPhases    int
+		ratio        float64
+		totalIORatio float64
+		expectFn     float64 // Expected Fn value (approx)
+		isUpsampling bool
+	}{
+		// Upsampling cases: Fn should be 1.0
+		{
+			name:         "44.1kHz_to_48kHz_upsampling",
+			numPhases:    147,
+			ratio:        48000.0 / 44100.0, // ~1.088
+			totalIORatio: 44100.0 / 48000.0, // ~0.919
+			expectFn:     1.0,
+			isUpsampling: true,
+		},
+		{
+			name:         "44.1kHz_to_96kHz_upsampling",
+			numPhases:    147,
+			ratio:        96000.0 / 44100.0, // ~2.177
+			totalIORatio: 44100.0 / 96000.0, // ~0.459
+			expectFn:     1.0,
+			isUpsampling: true,
+		},
+		// Downsampling cases: Fn should be 2 * mult
+		{
+			name:         "48kHz_to_44.1kHz_downsampling",
+			numPhases:    160,
+			ratio:        44100.0 / 48000.0, // ~0.919
+			totalIORatio: 48000.0 / 44100.0, // ~1.088
+			expectFn:     2.0 * 1.088,       // ~2.176
+			isUpsampling: false,
+		},
+		{
+			name:         "96kHz_to_48kHz_downsampling",
+			numPhases:    1,
+			ratio:        48000.0 / 96000.0, // 0.5
+			totalIORatio: 96000.0 / 48000.0, // 2.0
+			expectFn:     2.0 * 2.0,         // 4.0
+			isUpsampling: false,
+		},
+		{
+			name:         "48kHz_to_32kHz_downsampling",
+			numPhases:    2,
+			ratio:        32000.0 / 48000.0, // ~0.667
+			totalIORatio: 48000.0 / 32000.0, // 1.5
+			expectFn:     2.0 * 1.5,         // 3.0
+			isUpsampling: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			params := ComputePolyphaseFilterParams(tc.numPhases, tc.ratio, tc.totalIORatio, attenuation)
+
+			// Verify upsampling detection
+			assert.Equal(t, tc.isUpsampling, params.IsUpsampling,
+				"IsUpsampling should be %v", tc.isUpsampling)
+
+			// Verify Fn value (within 1% tolerance)
+			assert.InDelta(t, tc.expectFn, params.Fn, tc.expectFn*0.01,
+				"Fn should be approximately %.3f", tc.expectFn)
+
+			// For downsampling, verify Fs formula: Fs = 3 + |0.5 - 1| = 3.5
+			if !tc.isUpsampling {
+				expectedFsRaw := 3.0 + math.Abs(0.5-1.0) // = 3.5
+				assert.InDelta(t, expectedFsRaw, params.FsRaw, 0.01,
+					"FsRaw for downsampling should be 3.5")
+			}
+
+			// Verify Fp and Fs are normalized by Fn
+			assert.InDelta(t, params.FpRaw/params.Fn, params.Fp, 0.0001,
+				"Fp should equal FpRaw / Fn")
+			assert.InDelta(t, params.FsRaw/params.Fn, params.Fs, 0.0001,
+				"Fs should equal FsRaw / Fn")
+
+			// Verify Fc is reasonable (positive and less than 1)
+			assert.Greater(t, params.Fc, 0.0, "Fc should be positive")
+			assert.Less(t, params.Fc, 1.0, "Fc should be less than 1")
+
+			// Log detailed parameters for debugging
+			t.Logf("Params for %s:", tc.name)
+			t.Logf("  IsUpsampling: %v", params.IsUpsampling)
+			t.Logf("  Mult: %.4f", params.Mult)
+			t.Logf("  Fn: %.4f (expected: %.4f)", params.Fn, tc.expectFn)
+			t.Logf("  Fp1: %.4f, FsRaw: %.4f, FpRaw: %.4f", params.Fp1, params.FsRaw, params.FpRaw)
+			t.Logf("  Fp (normalized): %.4f, Fs (normalized): %.4f", params.Fp, params.Fs)
+			t.Logf("  TrBw: %.6f, Fc: %.6f", params.TrBw, params.Fc)
+			t.Logf("  TotalTaps: %d, TapsPerPhase: %d", params.TotalTaps, params.TapsPerPhase)
+		})
+	}
+}
+
+// TestComputePolyphaseFilterParams_DownsamplingVsUpsampling verifies that
+// downsampling produces different (and correct) parameters than upsampling.
+func TestComputePolyphaseFilterParams_DownsamplingVsUpsampling(t *testing.T) {
+	const attenuation = 126.0 // QualityHigh
+
+	// Compare 44.1kHz → 48kHz (upsampling) vs 48kHz → 44.1kHz (downsampling)
+	upParams := ComputePolyphaseFilterParams(147, 48000.0/44100.0, 44100.0/48000.0, attenuation)
+	downParams := ComputePolyphaseFilterParams(160, 44100.0/48000.0, 48000.0/44100.0, attenuation)
+
+	// Upsampling should have Fn = 1
+	assert.InEpsilon(t, 1.0, upParams.Fn, 1e-9, "Upsampling Fn should be 1.0")
+
+	// Downsampling should have Fn > 1 (specifically Fn = 2 * mult ≈ 2.176)
+	assert.Greater(t, downParams.Fn, 1.5, "Downsampling Fn should be > 1.5")
+
+	// Downsampling FsRaw should be 3.5 (from formula 3 + |0.5 - 1|)
+	assert.InDelta(t, 3.5, downParams.FsRaw, 0.01, "Downsampling FsRaw should be 3.5")
+
+	// After normalization, downsampling Fs should be much lower than FsRaw
+	assert.Less(t, downParams.Fs, downParams.FsRaw/2, "Downsampling Fs should be much less than FsRaw")
+
+	t.Logf("Upsampling (44.1k→48k): Fn=%.3f, FsRaw=%.3f, Fs=%.3f, Fc=%.6f",
+		upParams.Fn, upParams.FsRaw, upParams.Fs, upParams.Fc)
+	t.Logf("Downsampling (48k→44.1k): Fn=%.3f, FsRaw=%.3f, Fs=%.3f, Fc=%.6f",
+		downParams.Fn, downParams.FsRaw, downParams.Fs, downParams.Fc)
+}
+
+// =============================================================================
 // Unit Tests for DFTStage Core Functionality
 // =============================================================================
 

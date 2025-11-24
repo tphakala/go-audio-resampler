@@ -277,8 +277,9 @@ const (
 	transitionBWFactor = 0.05 // Transition bandwidth relative to Nyquist
 
 	// Polyphase filter design constants.
-	downsamplingTransitionScale = 0.15 // Transition band scale factor for downsampling
-	transitionBandwidthHalf     = 0.5  // Half factor for transition bandwidth calculation
+	downsamplingTransitionScale = 0.15  // Transition band scale factor for downsampling
+	transitionBandwidthHalf     = 0.5   // Half factor for transition bandwidth calculation
+	invFRespThreshold           = 0.999 // Guard against division by zero in rolloff compensation
 
 	// Buffer sizing constants.
 	historyBufferMultiplier = 2 // Extra capacity for history buffers
@@ -306,6 +307,13 @@ const (
 	imageRejectionFactor = 2.0       // Factor for image rejection frequency calculation
 	soxrFcDenominator    = 2.0       // Denominator in soxr's Fc formula: Fc = (Fp+Fs)/(2*phases)
 	soxrToOurNormScale   = 2.0       // Scale to convert soxr [0,1] to our [0,0.5] normalization
+
+	// soxr downsampling filter design constants (from cr.c lines 426-431).
+	// For downsampling with pre-stage: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
+	// These produce dramatically different filter parameters than upsampling.
+	soxrDownsamplingFnFactor = 2.0 // Fn = 2 * mult for downsampling
+	soxrDownsamplingFsBase   = 3.0 // Fs = 3 + |Fs1 - 1| base value
+	soxrUpsamplingFsCoeff    = 0.7 // Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7) coefficient
 
 	// lsxInvFResp function constants (from soxr's filter.c).
 	// sinePhi polynomial coefficients: ((a3*a + a2)*a + a1)*a + a0
@@ -918,10 +926,11 @@ type polyphaseFilter struct {
 //   - Cutoff frequency calculated using soxr's Fp/Fs methodology
 //
 // The polyphase stage is typically used AFTER a 2× DFT pre-stage.
-// This implementation follows soxr's cr.c filter design exactly:
-//   - Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7) for quality mode
+// This implementation follows soxr's cr.c and filter.c filter design exactly:
+//   - For upsampling: Fn = 1, Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7)
+//   - For downsampling: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
+//   - Fp and Fs normalized by Fn before calculating Fc
 //   - Fp adjusted using lsx_inv_f_resp for rolloff compensation
-//   - Fc = (Fp + Fs) / (2 * phases) - the midpoint of transition band
 //
 // Parameters:
 //   - numPhases: number of polyphase filter phases
@@ -931,185 +940,13 @@ type polyphaseFilter struct {
 func designPolyphaseFilter(numPhases int, ratio, totalIORatio float64, quality Quality) (*polyphaseFilter, error) {
 	attenuation := qualityToAttenuation(quality)
 
-	// soxr's cr.c uses the TOTAL io_ratio for Fp1:
-	//   double Fp1 = p->io_ratio * (rolloff < 0 ? 1 : (1 - .05 * pow(5., rolloff)));
-	//
-	// For 44100→96000: io_ratio = 44100/96000 = 0.459375
-	// With rolloff=0: Fp1 = io_ratio * 0.95 ≈ 0.4364
-	//
-	// For upsampling (totalIORatio < 1), the filter should pass frequencies
-	// up to the original Nyquist (scaled by totalIORatio).
-	//
-	// For downsampling (totalIORatio >= 1), the filter should pass frequencies
-	// up to the output Nyquist to prevent aliasing.
-	var Fp1 float64
-	if totalIORatio < 1.0 {
-		// Overall UPSAMPLING: use totalIORatio (input/output) for passband
-		Fp1 = totalIORatio * passbandRolloffScale
-	} else {
-		// Overall DOWNSAMPLING: Fp1 based on output Nyquist relative to input
-		// For downsampling, ratio = output/input, so output Nyquist = 0.5 * ratio
-		Fp1 = nyquistFraction * ratio * passbandRolloffScale
-	}
-	Fs1 := nyquistFraction // Stopband starts at Nyquist
+	// Use the new testable parameter computation function
+	params := ComputePolyphaseFilterParams(numPhases, ratio, totalIORatio, attenuation)
 
-	var Fp, Fs float64
-
-	// Determine if this is an UPSAMPLING or DOWNSAMPLING operation.
-	// We use totalIORatio (input_rate/output_rate) to determine the overall direction:
-	// - totalIORatio < 1 means overall UPSAMPLING (output rate > input rate)
-	// - totalIORatio >= 1 means overall DOWNSAMPLING (output rate <= input rate)
-	//
-	// The polyphase ratio might be < 1 even for upsampling (e.g., DFT 2x then polyphase),
-	// but the filter design should follow the overall direction.
-	isOverallUpsampling := totalIORatio < 1.0
-
-	if isOverallUpsampling {
-		// UPSAMPLING: Need anti-imaging filter
-		// Following soxr's cr.c methodology exactly:
-		//
-		// From soxr trace for 44100→96000:
-		// Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7) for mode > 0
-		// This gives Fs = 1.5133 (stopband extends above Nyquist for image rejection)
-		Fs = imageRejectionFactor - (Fp1 + (Fs1-Fp1)*0.7)
-
-		// Apply Fp adjustment using lsx_inv_f_resp approximation
-		// From soxr: Fp = Fs - (Fs - Fp1) / (1 - lsx_inv_f_resp(rolloffs[rolloff], attArb))
-		// For high quality (180 dB attenuation, -0.01 dB rolloff), lsx_inv_f_resp ≈ 0.171
-		invFResp := lsxInvFResp(-0.01, attenuation)
-		Fp = Fs - (Fs-Fp1)/(1.0-invFResp)
-	} else {
-		// DOWNSAMPLING: Need anti-aliasing filter
-		// For downsampling, the filter must reject frequencies above the output
-		// Nyquist to prevent aliasing when we decimate.
-		//
-		// The passband edge is at the output Nyquist (Fp1 = 0.5 * ratio * 0.99)
-		// The stopband should start slightly above that with enough transition
-		// band for a practical filter.
-		//
-		// Key insight: For downsampling, we use a simpler approach than soxr's
-		// complex multi-stage architecture. We set Fs slightly above Fp1 to
-		// provide a reasonable transition band, scaled by the ratio.
-		//
-		// For aggressive downsampling (ratio <= 0.5), the output Nyquist is low,
-		// so we need a tighter filter. For mild downsampling (ratio > 0.5),
-		// we have more frequency room for the transition band.
-
-		// Passband at output Nyquist (scaled by 0.99 for rolloff margin)
-		Fp = Fp1
-
-		// Stopband: Provide reasonable transition band
-		// Scale the transition band based on the ratio for proper anti-aliasing
-		// For ratio = 0.5: transition = 0.15 * 0.5 = 0.075 (pretty tight)
-		// For ratio = 0.9: transition = 0.15 * 0.9 = 0.135 (wider)
-		transitionScale := downsamplingTransitionScale * ratio
-		Fs = Fp1 + transitionScale
-		if Fs > Fs1 {
-			Fs = Fs1 // Cap at input Nyquist
-		}
-	}
-
-	// Calculate transition bandwidth following soxr's filter.c:
-	//   tr_bw = 0.5 * (Fs - Fp)
-	//   tr_bw /= phases
-	//   tr_bw = min(tr_bw, 0.5 * Fs / phases)
-	//
-	// Also enforce a minimum transition bandwidth to keep filter lengths practical.
-	// For very narrow transition bands (ratios close to 1.0), we widen the transition
-	// band, accepting some aliasing in the transition region in exchange for a
-	// practical filter length.
-	phases := float64(numPhases)
-	trBw := transitionBandwidthHalf * (Fs - Fp)
-	trBw /= phases
-
-	// Minimum transition bandwidth to keep filter length under ~8000 taps
-	// From Kaiser formula: totalTaps = ceil(att/tr_bw + 1)
-	// For 180 dB attenuation and 8000 taps: tr_bw_min = 180 / 7999 ≈ 0.0225
-	const minTrBw = 0.02 // Ensures reasonable filter length even for difficult ratios
-
-	trBwLimit := transitionBandwidthHalf * Fs / phases
-	if trBw > trBwLimit {
-		trBw = trBwLimit
-	}
-	if trBw < minTrBw {
-		trBw = minTrBw
-	}
-
-	// Calculate taps using Kaiser formula from soxr's filter.c:
-	//   num_taps = ceil(att/tr_bw + 1)
-	//
-	// For high attenuation (>60 dB), soxr uses a modified formula based on beta:
-	//   att_adjusted = ((.0007528358-1.577737e-05*beta)*beta+.6248022)*beta+.06186902
-	// But the simple formula works well for our attenuation range.
-	//
-	// We also apply a minimum taps per phase to ensure filter quality.
-	const minTapsPerPhase = 8   // Minimum for reasonable filter quality
-	const maxTapsPerPhase = 64  // Maximum to prevent excessive computation
-	const maxTotalTaps = 8000   // Maximum total taps (below filter package limit of 8191)
-	const minAttenForRatio = 80 // Minimum attenuation even for difficult ratios
-
-	// For very narrow transition bands (ratios close to 1.0), the Kaiser formula
-	// can require millions of taps. In these cases, we reduce attenuation to keep
-	// the filter practical while maintaining reasonable quality.
-	effectiveAttenuation := attenuation
-	idealTotalTaps := int(math.Ceil(attenuation/trBw + 1))
-
-	if idealTotalTaps > maxTotalTaps {
-		// Reduce attenuation to achieve maxTotalTaps
-		// From: totalTaps = ceil(att/tr_bw + 1)
-		// Solve for att: att = (totalTaps - 1) * tr_bw
-		effectiveAttenuation = float64(maxTotalTaps-1) * trBw
-		if effectiveAttenuation < minAttenForRatio {
-			effectiveAttenuation = minAttenForRatio
-		}
-	}
-
-	totalTaps := int(math.Ceil(effectiveAttenuation/trBw + 1))
-	tapsPerPhase := (totalTaps + numPhases - 1) / numPhases // Round up
-
-	// Clamp taps per phase to reasonable range
-	if tapsPerPhase < minTapsPerPhase {
-		tapsPerPhase = minTapsPerPhase
-	} else if tapsPerPhase > maxTapsPerPhase {
-		tapsPerPhase = maxTapsPerPhase
-	}
-
-	// Recalculate total taps based on clamped taps per phase
-	totalTaps = numPhases*tapsPerPhase - 1 // soxr uses (phases * taps) - 1
-
-	// Calculate prototype filter cutoff.
-	//
-	// For UPSAMPLING: Following soxr's filter.c methodology:
-	//   Fc = (Fp + Fs) / (2 * phases)
-	// The prototype filter operates at numPhases × input rate for interpolation.
-	//
-	// For DOWNSAMPLING: The filter operates at the input rate for decimation.
-	// We want to cut at the output Nyquist (Fp) to prevent aliasing.
-	// The prototype is designed at the input rate, so we use:
-	//   cutoff = (Fp + Fs) / 4 (no division by phases)
-	//
-	// Normalization:
-	//   - soxr uses [0, 1] where 1.0 = Nyquist frequency
-	//   - Our filter design uses [0, 0.5] where 0.5 = Nyquist
-	var cutoff float64
-	if isOverallUpsampling {
-		// Upsampling: divide by phases (prototype at phases × input rate)
-		soxrFc := (Fp + Fs) / (soxrFcDenominator * phases)
-		cutoff = soxrFc / soxrToOurNormScale
-	} else {
-		// Downsampling: the prototype filter operates at the input rate.
-		// The cutoff should be at the output Nyquist (Fp) to prevent aliasing.
-		// But the polyphase decomposition requires the cutoff to be scaled
-		// by 1/phases for proper phase response.
-		//
-		// For decimation by M with L phases:
-		// - The prototype is designed at L×input rate (same as interpolation)
-		// - Cutoff should be at output_Nyquist / L in prototype terms
-		//
-		// output_Nyquist = Fp (in [0, 0.5] input scale)
-		// prototype cutoff = Fp / phases (since prototype is at L×input rate)
-		cutoff = Fp / phases / soxrToOurNormScale
-	}
+	// Convert Fc to our filter design normalization ([0, 0.5] where 0.5 = Nyquist)
+	// params.Fc is already normalized by Fn and phases, but in soxr's [0, 1] scale
+	// Our filter design uses [0, 0.5], so divide by 2
+	cutoff := params.Fc / soxrToOurNormScale
 
 	// Ensure cutoff is valid (within 0 to 0.5 normalized range for lowpass)
 	if cutoff <= 0 {
@@ -1121,7 +958,7 @@ func designPolyphaseFilter(numPhases int, ratio, totalIORatio float64, quality Q
 
 	// Design prototype using Kaiser window
 	prototype, err := filter.DesignLowPassFilter(filter.FilterParams{
-		NumTaps:     totalTaps,
+		NumTaps:     params.TotalTaps,
 		CutoffFreq:  cutoff,
 		Attenuation: attenuation,
 		Gain:        1.0,
@@ -1141,8 +978,8 @@ func designPolyphaseFilter(numPhases int, ratio, totalIORatio float64, quality Q
 
 	// Decompose into polyphase branches
 	// Coefficient layout: coeffs[tap * numPhases + phase]
-	coeffs := make([]float64, tapsPerPhase*numPhases)
-	for tap := range tapsPerPhase {
+	coeffs := make([]float64, params.TapsPerPhase*numPhases)
+	for tap := range params.TapsPerPhase {
 		for phase := range numPhases {
 			protoIdx := tap*numPhases + phase
 			if protoIdx < len(prototype) {
@@ -1154,7 +991,7 @@ func designPolyphaseFilter(numPhases int, ratio, totalIORatio float64, quality Q
 	return &polyphaseFilter{
 		coeffs:       coeffs,
 		numPhases:    numPhases,
-		tapsPerPhase: tapsPerPhase,
+		tapsPerPhase: params.TapsPerPhase,
 	}, nil
 }
 
@@ -1264,4 +1101,203 @@ func lsxInvFResp(drop, a float64) float64 {
 		return x
 	}
 	return 1 - x
+}
+
+// =============================================================================
+// Filter Parameter Computation (Testable)
+// =============================================================================
+
+// PolyphaseFilterParams holds the computed filter design parameters.
+// This struct is exported for testing purposes.
+type PolyphaseFilterParams struct {
+	// Input parameters
+	NumPhases    int     // Number of polyphase phases
+	Ratio        float64 // Polyphase stage ratio (output/input for this stage)
+	TotalIORatio float64 // Total input/output ratio for the full resampler
+	Attenuation  float64 // Stopband attenuation in dB
+
+	// Computed intermediate values (for debugging/testing)
+	IsUpsampling bool    // true if overall upsampling operation
+	Mult         float64 // Decimation multiplier (1.0 for upsampling, >1 for downsampling)
+	Fn           float64 // Nyquist normalization factor
+	Fp1          float64 // Initial passband edge (before Fn normalization)
+	Fs1          float64 // Stopband reference (Nyquist = 0.5)
+	FpRaw        float64 // Passband after rolloff adjustment, before Fn normalization
+	FsRaw        float64 // Stopband before Fn normalization
+
+	// Normalized parameters (after Fn normalization)
+	Fp   float64 // Normalized passband edge
+	Fs   float64 // Normalized stopband edge
+	TrBw float64 // Transition bandwidth (after phase division)
+	Fc   float64 // Final cutoff frequency for filter design
+
+	// Filter sizing
+	TotalTaps    int // Total filter taps
+	TapsPerPhase int // Taps per polyphase phase
+}
+
+// ComputePolyphaseFilterParams computes filter design parameters following soxr's methodology.
+//
+// This function implements the critical Fn normalization from soxr's cr.c and filter.c:
+//   - For upsampling: Fn = 1, Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7)
+//   - For downsampling: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
+//   - Fp and Fs are normalized by dividing by Fn before computing Fc
+//
+// Parameters:
+//   - numPhases: number of polyphase filter phases
+//   - ratio: polyphase stage ratio (output/input for this stage)
+//   - totalIORatio: total input/output ratio (input_rate/output_rate)
+//   - attenuation: desired stopband attenuation in dB
+//
+// Returns computed filter parameters for filter design.
+func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio, attenuation float64) PolyphaseFilterParams {
+	params := PolyphaseFilterParams{
+		NumPhases:    numPhases,
+		Ratio:        ratio,
+		TotalIORatio: totalIORatio,
+		Attenuation:  attenuation,
+		Fs1:          nyquistFraction, // 0.5
+	}
+
+	phases := float64(numPhases)
+	params.IsUpsampling = totalIORatio < 1.0
+
+	// Compute mult: the decimation multiplier
+	// For upsampling: mult = 1
+	// For downsampling: mult = totalIORatio (input/output ratio)
+	// This matches soxr's: mult = upsample? 1 : arbM / arbL
+	if params.IsUpsampling {
+		params.Mult = 1.0
+	} else {
+		params.Mult = totalIORatio
+	}
+
+	// Compute initial passband edge Fp1
+	// From soxr: Fp1 = p->io_ratio * (rolloff < 0 ? 1 : (1 - .05 * pow(5., rolloff)))
+	// With rolloff=0: Fp1 = io_ratio * 0.95 (we use 0.99 for high quality)
+	if params.IsUpsampling {
+		// Upsampling: passband at original Nyquist scaled by io_ratio
+		params.Fp1 = totalIORatio * passbandRolloffScale
+	} else {
+		// Downsampling: passband at output Nyquist
+		// output_Nyquist = 0.5 * (output_rate/input_rate) = 0.5 / totalIORatio
+		// But in normalized form where input Nyquist = 0.5:
+		// Fp1 = 0.5 * ratio * 0.99 (ratio = output/input for polyphase stage)
+		params.Fp1 = nyquistFraction * ratio * passbandRolloffScale
+	}
+
+	// Compute Fn and Fs based on upsampling/downsampling
+	// This is the CRITICAL difference from the old implementation
+	//
+	// From soxr cr.c lines 429-431:
+	//   if (!upsample && preM)
+	//     Fn = 2 * mult, Fs = 3 + fabs(Fs1 - 1);
+	//   else
+	//     Fn = 1, Fs = 2 - (mode? Fp1 + (Fs1 - Fp1) * .7 : Fs1);
+	if params.IsUpsampling {
+		// Upsampling: Fn = 1, use image rejection formula
+		params.Fn = 1.0
+		// Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7) for mode > 0
+		params.FsRaw = imageRejectionFactor - (params.Fp1 + (params.Fs1-params.Fp1)*soxrUpsamplingFsCoeff)
+		params.FpRaw = params.Fp1
+	} else {
+		// Downsampling: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
+		params.Fn = soxrDownsamplingFnFactor * params.Mult
+		// Fs = 3 + |0.5 - 1| = 3.5
+		params.FsRaw = soxrDownsamplingFsBase + math.Abs(params.Fs1-1.0)
+		params.FpRaw = params.Fp1
+	}
+
+	// Apply rolloff compensation using lsxInvFResp
+	// From soxr: Fp = Fs - (Fs - Fp) / (1 - lsx_inv_f_resp(rolloffs[rolloff], attArb))
+	// rolloffs[0] = -0.01 for high quality
+	//
+	// NOTE: This adjustment is primarily designed for upsampling where Fp1 and Fs
+	// are relatively close. For downsampling with Fs = 3.5 and small Fp1, this
+	// formula can produce negative values, which is invalid.
+	// We only apply the adjustment when it produces a valid (positive) result.
+	invFResp := lsxInvFResp(-0.01, attenuation)
+	if invFResp < invFRespThreshold { // Guard against division by zero
+		adjustedFp := params.FsRaw - (params.FsRaw-params.FpRaw)/(1.0-invFResp)
+		// Only apply if result is positive and less than FsRaw
+		if adjustedFp > 0 && adjustedFp < params.FsRaw {
+			params.FpRaw = adjustedFp
+		}
+		// For downsampling with large Fs, keep original Fp1 as FpRaw
+	}
+
+	// Normalize by Fn (CRITICAL: this was missing in the old implementation!)
+	// From soxr filter.c: Fp /= fabs(Fn), Fs /= fabs(Fn)
+	params.Fp = params.FpRaw / math.Abs(params.Fn)
+	params.Fs = params.FsRaw / math.Abs(params.Fn)
+
+	// Calculate transition bandwidth following soxr's filter.c:
+	//   tr_bw = 0.5 * (Fs - Fp)
+	//   tr_bw /= phases
+	//   tr_bw = min(tr_bw, 0.5 * Fs / phases)
+	//   Fc = Fs - tr_bw
+	params.TrBw = transitionBandwidthHalf * (params.Fs - params.Fp)
+	params.TrBw /= phases
+
+	trBwLimit := transitionBandwidthHalf * params.Fs / phases
+	if params.TrBw > trBwLimit {
+		params.TrBw = trBwLimit
+	}
+
+	// Enforce minimum transition bandwidth for practical filter lengths
+	const minTrBw = 0.001 // More permissive than before since Fn normalization fixes the main issue
+	if params.TrBw < minTrBw {
+		params.TrBw = minTrBw
+	}
+
+	// Fc = Fs / phases - tr_bw (following soxr's filter.c)
+	// After phase division: Fs_phase = Fs / phases, then Fc = Fs_phase - tr_bw
+	fsPhase := params.Fs / phases
+	params.Fc = fsPhase - params.TrBw
+
+	// Ensure Fc is positive and reasonable
+	if params.Fc < minTrBw {
+		params.Fc = minTrBw
+	}
+
+	// Calculate filter taps using Kaiser formula
+	// From soxr: num_taps = ceil(att/tr_bw + 1)
+	const (
+		minTapsPerPhase = 8
+		maxTapsPerPhase = 64
+		maxTotalTaps    = 8000     // Target maximum (for Kaiser formula calculation)
+		filterLibLimit  = 8191 - 1 // Hard limit from filter library (minus 1 for safety)
+		minAtten        = 80.0
+	)
+
+	effectiveAtten := attenuation
+	idealTaps := int(math.Ceil(attenuation/params.TrBw + 1))
+
+	if idealTaps > maxTotalTaps {
+		effectiveAtten = float64(maxTotalTaps-1) * params.TrBw
+		if effectiveAtten < minAtten {
+			effectiveAtten = minAtten
+		}
+	}
+
+	params.TotalTaps = int(math.Ceil(effectiveAtten/params.TrBw + 1))
+	params.TapsPerPhase = (params.TotalTaps + numPhases - 1) / numPhases
+
+	if params.TapsPerPhase < minTapsPerPhase {
+		params.TapsPerPhase = minTapsPerPhase
+	} else if params.TapsPerPhase > maxTapsPerPhase {
+		params.TapsPerPhase = maxTapsPerPhase
+	}
+
+	// Calculate final total taps and enforce the filter library's hard limit
+	params.TotalTaps = numPhases*params.TapsPerPhase - 1
+	if params.TotalTaps > filterLibLimit {
+		// Reduce taps per phase to stay within limit
+		// filterLibLimit >= numPhases * tapsPerPhase - 1
+		// tapsPerPhase <= (filterLibLimit + 1) / numPhases
+		params.TapsPerPhase = max((filterLibLimit+1)/numPhases, minTapsPerPhase)
+		params.TotalTaps = numPhases*params.TapsPerPhase - 1
+	}
+
+	return params
 }
