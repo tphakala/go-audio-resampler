@@ -53,7 +53,7 @@ func TestDFTStage_Reset(t *testing.T) {
 
 // TestPolyphaseStage_Reset verifies Reset() properly clears PolyphaseStage state.
 func TestPolyphaseStage_Reset(t *testing.T) {
-	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
 	require.NoError(t, err)
 
 	// Process some data to populate internal state
@@ -69,7 +69,7 @@ func TestPolyphaseStage_Reset(t *testing.T) {
 	stage.Reset()
 
 	// Process the same data again
-	stage2, err := NewPolyphaseStage[float64](1.088435374, 0.459375, QualityHigh)
+	stage2, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
 	require.NoError(t, err)
 
 	output2, err := stage.Process(input1)
@@ -394,7 +394,7 @@ func TestResampler_StatisticsReset(t *testing.T) {
 
 // TestPolyphaseStage_StatisticsReset verifies statistics are cleared on Reset().
 func TestPolyphaseStage_StatisticsReset(t *testing.T) {
-	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
 	require.NoError(t, err)
 
 	// Process some data

@@ -94,7 +94,7 @@ func TestDFTStage_FlushDoesNotCorruptOutput(t *testing.T) {
 // after subsequent calls to Process() or Flush().
 func TestPolyphaseStage_BufferIntegrity(t *testing.T) {
 	// Create polyphase stage for non-integer ratio
-	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
 	require.NoError(t, err, "Failed to create polyphase stage")
 
 	// Generate test signal
@@ -133,7 +133,7 @@ func TestPolyphaseStage_BufferIntegrity(t *testing.T) {
 // TestPolyphaseStage_FlushDoesNotCorruptOutput verifies that calling Flush()
 // after Process() does not corrupt the previously returned output.
 func TestPolyphaseStage_FlushDoesNotCorruptOutput(t *testing.T) {
-	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
 	require.NoError(t, err, "Failed to create polyphase stage")
 
 	// Generate test signal
@@ -323,7 +323,7 @@ func TestDFTStage_MultipleProcessCalls(t *testing.T) {
 // TestPolyphaseStage_MultipleProcessCalls tests that multiple consecutive Process()
 // calls work correctly.
 func TestPolyphaseStage_MultipleProcessCalls(t *testing.T) {
-	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
 	require.NoError(t, err, "Failed to create polyphase stage")
 
 	const numCalls = 10

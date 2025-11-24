@@ -92,7 +92,8 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 			polyphaseRatio := outputRate / intermediateRate
 			// Pass total io_ratio for correct Fp1 calculation (soxr uses total ratio)
 			totalIORatio := inputRate / outputRate
-			polyStage, err := NewPolyphaseStage[F](polyphaseRatio, totalIORatio, quality)
+			// hasPreStage = true because we have a DFT pre-stage
+			polyStage, err := NewPolyphaseStage[F](polyphaseRatio, totalIORatio, true, quality)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create polyphase stage: %w", err)
 			}
@@ -106,7 +107,8 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 		// 2. The polyphase filter can handle anti-aliasing directly
 		// 3. soxr also uses this approach for downsampling
 		totalIORatio := inputRate / outputRate
-		polyStage, err := NewPolyphaseStage[F](ratio, totalIORatio, quality)
+		// hasPreStage = false because we go directly to polyphase
+		polyStage, err := NewPolyphaseStage[F](ratio, totalIORatio, false, quality)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create polyphase stage: %w", err)
 		}
@@ -732,8 +734,10 @@ type PolyphaseStage[F simdops.Float] struct {
 //   - ratio: Output/input ratio for this stage (e.g., 1.0884 for 88.2→96 kHz)
 //   - totalIORatio: Total input/output ratio (e.g., 0.459 for 44.1→96 kHz)
 //     This is used to correctly set Fp1 for anti-imaging filter design.
+//   - hasPreStage: Whether this polyphase stage is preceded by a DFT pre-stage.
+//     This affects the Fn/Fs calculation (soxr uses different formulas).
 //   - quality: Quality level
-func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, quality Quality) (*PolyphaseStage[F], error) {
+func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage bool, quality Quality) (*PolyphaseStage[F], error) {
 	if ratio <= 0 {
 		return nil, fmt.Errorf("ratio must be positive: %f", ratio)
 	}
@@ -746,8 +750,8 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, quality Qua
 	numPhases, step := findRationalApprox(ratio)
 
 	// Design polyphase filter bank (always in float64 for precision)
-	// Pass totalIORatio for correct Fp1 calculation (soxr uses total ratio)
-	filterBank, err := designPolyphaseFilter(numPhases, ratio, totalIORatio, quality)
+	// Pass totalIORatio and hasPreStage for correct Fp1/Fn calculation (soxr uses total ratio)
+	filterBank, err := designPolyphaseFilter(numPhases, ratio, totalIORatio, hasPreStage, quality)
 	if err != nil {
 		return nil, fmt.Errorf("failed to design polyphase filter: %w", err)
 	}
@@ -925,10 +929,10 @@ type polyphaseFilter struct {
 //   - Each phase independently has DC gain ≈ 1.0
 //   - Cutoff frequency calculated using soxr's Fp/Fs methodology
 //
-// The polyphase stage is typically used AFTER a 2× DFT pre-stage.
+// The polyphase stage may or may not be preceded by a DFT pre-stage.
 // This implementation follows soxr's cr.c and filter.c filter design exactly:
-//   - For upsampling: Fn = 1, Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7)
-//   - For downsampling: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
+//   - For downsampling WITH pre-stage: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
+//   - For upsampling OR no pre-stage: Fn = 1, Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7)
 //   - Fp and Fs normalized by Fn before calculating Fc
 //   - Fp adjusted using lsx_inv_f_resp for rolloff compensation
 //
@@ -936,12 +940,13 @@ type polyphaseFilter struct {
 //   - numPhases: number of polyphase filter phases
 //   - ratio: polyphase stage ratio (output/input for this stage)
 //   - totalIORatio: total input/output ratio for the full resampler (used for Fp1 calculation)
+//   - hasPreStage: whether this stage is preceded by a DFT pre-stage
 //   - quality: quality level
-func designPolyphaseFilter(numPhases int, ratio, totalIORatio float64, quality Quality) (*polyphaseFilter, error) {
+func designPolyphaseFilter(numPhases int, ratio, totalIORatio float64, hasPreStage bool, quality Quality) (*polyphaseFilter, error) {
 	attenuation := qualityToAttenuation(quality)
 
 	// Use the new testable parameter computation function
-	params := ComputePolyphaseFilterParams(numPhases, ratio, totalIORatio, attenuation)
+	params := ComputePolyphaseFilterParams(numPhases, ratio, totalIORatio, hasPreStage, attenuation)
 
 	// Convert Fc to our filter design normalization ([0, 0.5] where 0.5 = Nyquist)
 	// params.Fc is already normalized by Fn and phases, but in soxr's [0, 1] scale
@@ -1114,6 +1119,7 @@ type PolyphaseFilterParams struct {
 	NumPhases    int     // Number of polyphase phases
 	Ratio        float64 // Polyphase stage ratio (output/input for this stage)
 	TotalIORatio float64 // Total input/output ratio for the full resampler
+	HasPreStage  bool    // Whether preceded by a DFT pre-stage
 	Attenuation  float64 // Stopband attenuation in dB
 
 	// Computed intermediate values (for debugging/testing)
@@ -1139,22 +1145,24 @@ type PolyphaseFilterParams struct {
 // ComputePolyphaseFilterParams computes filter design parameters following soxr's methodology.
 //
 // This function implements the critical Fn normalization from soxr's cr.c and filter.c:
-//   - For upsampling: Fn = 1, Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7)
-//   - For downsampling: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
+//   - For downsampling WITH pre-stage: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
+//   - For upsampling OR no pre-stage: Fn = 1, Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7)
 //   - Fp and Fs are normalized by dividing by Fn before computing Fc
 //
 // Parameters:
 //   - numPhases: number of polyphase filter phases
 //   - ratio: polyphase stage ratio (output/input for this stage)
 //   - totalIORatio: total input/output ratio (input_rate/output_rate)
+//   - hasPreStage: whether this polyphase stage is preceded by a DFT pre-stage
 //   - attenuation: desired stopband attenuation in dB
 //
 // Returns computed filter parameters for filter design.
-func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio, attenuation float64) PolyphaseFilterParams {
+func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, hasPreStage bool, attenuation float64) PolyphaseFilterParams {
 	params := PolyphaseFilterParams{
 		NumPhases:    numPhases,
 		Ratio:        ratio,
 		TotalIORatio: totalIORatio,
+		HasPreStage:  hasPreStage,
 		Attenuation:  attenuation,
 		Fs1:          nyquistFraction, // 0.5
 	}
@@ -1186,25 +1194,30 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio, attenuatio
 		params.Fp1 = nyquistFraction * ratio * passbandRolloffScale
 	}
 
-	// Compute Fn and Fs based on upsampling/downsampling
-	// This is the CRITICAL difference from the old implementation
+	// Compute Fn and Fs based on upsampling/downsampling AND presence of pre-stage
+	// This is the CRITICAL logic from soxr cr.c lines 429-431:
 	//
-	// From soxr cr.c lines 429-431:
 	//   if (!upsample && preM)
 	//     Fn = 2 * mult, Fs = 3 + fabs(Fs1 - 1);
 	//   else
 	//     Fn = 1, Fs = 2 - (mode? Fp1 + (Fs1 - Fp1) * .7 : Fs1);
-	if params.IsUpsampling {
-		// Upsampling: Fn = 1, use image rejection formula
-		params.Fn = 1.0
-		// Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7) for mode > 0
-		params.FsRaw = imageRejectionFactor - (params.Fp1 + (params.Fs1-params.Fp1)*soxrUpsamplingFsCoeff)
-		params.FpRaw = params.Fp1
-	} else {
-		// Downsampling: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
+	//
+	// Key insight: The Fn=2*mult formula is ONLY used when:
+	//   1. Downsampling (!upsample), AND
+	//   2. There IS a pre-stage (preM != 0)
+	//
+	// For downsampling WITHOUT pre-stage (preM == 0), use the else branch (Fn=1).
+	if !params.IsUpsampling && hasPreStage {
+		// Downsampling WITH pre-stage: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
 		params.Fn = soxrDownsamplingFnFactor * params.Mult
 		// Fs = 3 + |0.5 - 1| = 3.5
 		params.FsRaw = soxrDownsamplingFsBase + math.Abs(params.Fs1-1.0)
+		params.FpRaw = params.Fp1
+	} else {
+		// Upsampling OR downsampling without pre-stage: Fn = 1, use image rejection formula
+		params.Fn = 1.0
+		// Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7) for mode > 0
+		params.FsRaw = imageRejectionFactor - (params.Fp1 + (params.Fs1-params.Fp1)*soxrUpsamplingFsCoeff)
 		params.FpRaw = params.Fp1
 	}
 

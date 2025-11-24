@@ -103,7 +103,7 @@ func BenchmarkFloat64Polyphase(b *testing.B) {
 	// Ratio for 88200 -> 48000 (after 2x upsample)
 	ratio := 48000.0 / 88200.0
 	totalIORatio := 44100.0 / 48000.0 // For 44100 -> 48000 conversion
-	stage, err := NewPolyphaseStage[float64](ratio, totalIORatio, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](ratio, totalIORatio, true, QualityHigh)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func BenchmarkFloat32Polyphase(b *testing.B) {
 	// Ratio for 88200 -> 48000 (after 2x upsample)
 	ratio := 48000.0 / 88200.0
 	totalIORatio := 44100.0 / 48000.0 // For 44100 -> 48000 conversion
-	stage, err := NewPolyphaseStage[float32](ratio, totalIORatio, QualityHigh)
+	stage, err := NewPolyphaseStage[float32](ratio, totalIORatio, true, QualityHigh)
 	if err != nil {
 		b.Fatal(err)
 	}

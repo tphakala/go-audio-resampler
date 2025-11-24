@@ -166,7 +166,16 @@ func TestLsxInvFResp_MonotonicBehavior(t *testing.T) {
 // =============================================================================
 
 // TestComputePolyphaseFilterParams_FnNormalization tests that the Fn normalization
-// is correctly applied for upsampling vs downsampling.
+// is correctly applied based on upsampling/downsampling AND presence of pre-stage.
+//
+// From soxr cr.c lines 429-431:
+//   if (!upsample && preM)
+//     Fn = 2 * mult, Fs = 3 + fabs(Fs1 - 1);
+//   else
+//     Fn = 1, Fs = 2 - (mode? Fp1 + (Fs1 - Fp1) * .7 : Fs1);
+//
+// Key insight: Fn=2*mult is ONLY used when downsampling WITH a pre-stage.
+// For downsampling WITHOUT pre-stage (our Go architecture), Fn=1.
 func TestComputePolyphaseFilterParams_FnNormalization(t *testing.T) {
 	const attenuation = 126.0 // QualityHigh
 
@@ -175,70 +184,99 @@ func TestComputePolyphaseFilterParams_FnNormalization(t *testing.T) {
 		numPhases    int
 		ratio        float64
 		totalIORatio float64
+		hasPreStage  bool
 		expectFn     float64 // Expected Fn value (approx)
 		isUpsampling bool
 	}{
-		// Upsampling cases: Fn should be 1.0
+		// Upsampling cases with pre-stage: Fn should be 1.0
 		{
-			name:         "44.1kHz_to_48kHz_upsampling",
+			name:         "44.1kHz_to_48kHz_upsampling_with_prestage",
 			numPhases:    147,
 			ratio:        48000.0 / 44100.0, // ~1.088
 			totalIORatio: 44100.0 / 48000.0, // ~0.919
+			hasPreStage:  true,
 			expectFn:     1.0,
 			isUpsampling: true,
 		},
 		{
-			name:         "44.1kHz_to_96kHz_upsampling",
+			name:         "44.1kHz_to_96kHz_upsampling_with_prestage",
 			numPhases:    147,
 			ratio:        96000.0 / 44100.0, // ~2.177
 			totalIORatio: 44100.0 / 96000.0, // ~0.459
+			hasPreStage:  true,
 			expectFn:     1.0,
 			isUpsampling: true,
 		},
-		// Downsampling cases: Fn should be 2 * mult
+		// Downsampling WITHOUT pre-stage: Fn should be 1.0 (our Go architecture)
 		{
-			name:         "48kHz_to_44.1kHz_downsampling",
+			name:         "48kHz_to_44.1kHz_downsampling_no_prestage",
 			numPhases:    160,
 			ratio:        44100.0 / 48000.0, // ~0.919
 			totalIORatio: 48000.0 / 44100.0, // ~1.088
-			expectFn:     2.0 * 1.088,       // ~2.176
+			hasPreStage:  false,
+			expectFn:     1.0, // Fn=1 when no pre-stage
 			isUpsampling: false,
 		},
 		{
-			name:         "96kHz_to_48kHz_downsampling",
+			name:         "96kHz_to_48kHz_downsampling_no_prestage",
 			numPhases:    1,
 			ratio:        48000.0 / 96000.0, // 0.5
 			totalIORatio: 96000.0 / 48000.0, // 2.0
-			expectFn:     2.0 * 2.0,         // 4.0
+			hasPreStage:  false,
+			expectFn:     1.0, // Fn=1 when no pre-stage
 			isUpsampling: false,
 		},
 		{
-			name:         "48kHz_to_32kHz_downsampling",
+			name:         "48kHz_to_32kHz_downsampling_no_prestage",
 			numPhases:    2,
 			ratio:        32000.0 / 48000.0, // ~0.667
 			totalIORatio: 48000.0 / 32000.0, // 1.5
-			expectFn:     2.0 * 1.5,         // 3.0
+			hasPreStage:  false,
+			expectFn:     1.0, // Fn=1 when no pre-stage
+			isUpsampling: false,
+		},
+		// Downsampling WITH pre-stage: Fn should be 2 * mult (soxr formula)
+		{
+			name:         "48kHz_to_44.1kHz_downsampling_with_prestage",
+			numPhases:    160,
+			ratio:        44100.0 / 48000.0, // ~0.919
+			totalIORatio: 48000.0 / 44100.0, // ~1.088
+			hasPreStage:  true,
+			expectFn:     2.0 * 1.088, // ~2.176
+			isUpsampling: false,
+		},
+		{
+			name:         "96kHz_to_48kHz_downsampling_with_prestage",
+			numPhases:    1,
+			ratio:        48000.0 / 96000.0, // 0.5
+			totalIORatio: 96000.0 / 48000.0, // 2.0
+			hasPreStage:  true,
+			expectFn:     2.0 * 2.0, // 4.0
 			isUpsampling: false,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			params := ComputePolyphaseFilterParams(tc.numPhases, tc.ratio, tc.totalIORatio, attenuation)
+			params := ComputePolyphaseFilterParams(tc.numPhases, tc.ratio, tc.totalIORatio, tc.hasPreStage, attenuation)
 
 			// Verify upsampling detection
 			assert.Equal(t, tc.isUpsampling, params.IsUpsampling,
 				"IsUpsampling should be %v", tc.isUpsampling)
 
+			// Verify hasPreStage is stored
+			assert.Equal(t, tc.hasPreStage, params.HasPreStage,
+				"HasPreStage should be %v", tc.hasPreStage)
+
 			// Verify Fn value (within 1% tolerance)
 			assert.InDelta(t, tc.expectFn, params.Fn, tc.expectFn*0.01,
 				"Fn should be approximately %.3f", tc.expectFn)
 
-			// For downsampling, verify Fs formula: Fs = 3 + |0.5 - 1| = 3.5
-			if !tc.isUpsampling {
+			// For downsampling WITH pre-stage, verify Fs formula: Fs = 3 + |0.5 - 1| = 3.5
+			if !tc.isUpsampling && tc.hasPreStage {
 				expectedFsRaw := 3.0 + math.Abs(0.5-1.0) // = 3.5
 				assert.InDelta(t, expectedFsRaw, params.FsRaw, 0.01,
-					"FsRaw for downsampling should be 3.5")
+					"FsRaw for downsampling with pre-stage should be 3.5")
 			}
 
 			// Verify Fp and Fs are normalized by Fn
@@ -253,7 +291,7 @@ func TestComputePolyphaseFilterParams_FnNormalization(t *testing.T) {
 
 			// Log detailed parameters for debugging
 			t.Logf("Params for %s:", tc.name)
-			t.Logf("  IsUpsampling: %v", params.IsUpsampling)
+			t.Logf("  IsUpsampling: %v, HasPreStage: %v", params.IsUpsampling, params.HasPreStage)
 			t.Logf("  Mult: %.4f", params.Mult)
 			t.Logf("  Fn: %.4f (expected: %.4f)", params.Fn, tc.expectFn)
 			t.Logf("  Fp1: %.4f, FsRaw: %.4f, FpRaw: %.4f", params.Fp1, params.FsRaw, params.FpRaw)
@@ -265,30 +303,39 @@ func TestComputePolyphaseFilterParams_FnNormalization(t *testing.T) {
 }
 
 // TestComputePolyphaseFilterParams_DownsamplingVsUpsampling verifies that
-// downsampling produces different (and correct) parameters than upsampling.
+// the hasPreStage parameter correctly changes the filter design parameters.
 func TestComputePolyphaseFilterParams_DownsamplingVsUpsampling(t *testing.T) {
 	const attenuation = 126.0 // QualityHigh
 
-	// Compare 44.1kHz → 48kHz (upsampling) vs 48kHz → 44.1kHz (downsampling)
-	upParams := ComputePolyphaseFilterParams(147, 48000.0/44100.0, 44100.0/48000.0, attenuation)
-	downParams := ComputePolyphaseFilterParams(160, 44100.0/48000.0, 48000.0/44100.0, attenuation)
+	// Compare upsampling with pre-stage (our Go architecture)
+	// vs downsampling without pre-stage (our Go architecture)
+	// vs downsampling with pre-stage (hypothetical)
+	upParams := ComputePolyphaseFilterParams(147, 48000.0/44100.0, 44100.0/48000.0, true, attenuation)
+	downNoPreParams := ComputePolyphaseFilterParams(160, 44100.0/48000.0, 48000.0/44100.0, false, attenuation)
+	downWithPreParams := ComputePolyphaseFilterParams(160, 44100.0/48000.0, 48000.0/44100.0, true, attenuation)
 
 	// Upsampling should have Fn = 1
 	assert.InEpsilon(t, 1.0, upParams.Fn, 1e-9, "Upsampling Fn should be 1.0")
 
-	// Downsampling should have Fn > 1 (specifically Fn = 2 * mult ≈ 2.176)
-	assert.Greater(t, downParams.Fn, 1.5, "Downsampling Fn should be > 1.5")
+	// Downsampling WITHOUT pre-stage should also have Fn = 1 (matches soxr logic)
+	assert.InEpsilon(t, 1.0, downNoPreParams.Fn, 1e-9, "Downsampling without pre-stage Fn should be 1.0")
 
-	// Downsampling FsRaw should be 3.5 (from formula 3 + |0.5 - 1|)
-	assert.InDelta(t, 3.5, downParams.FsRaw, 0.01, "Downsampling FsRaw should be 3.5")
+	// Downsampling WITH pre-stage should have Fn = 2 * mult ≈ 2.176
+	assert.Greater(t, downWithPreParams.Fn, 1.5, "Downsampling with pre-stage Fn should be > 1.5")
 
-	// After normalization, downsampling Fs should be much lower than FsRaw
-	assert.Less(t, downParams.Fs, downParams.FsRaw/2, "Downsampling Fs should be much less than FsRaw")
+	// Downsampling WITH pre-stage FsRaw should be 3.5 (from formula 3 + |0.5 - 1|)
+	assert.InDelta(t, 3.5, downWithPreParams.FsRaw, 0.01, "Downsampling with pre-stage FsRaw should be 3.5")
+
+	// Downsampling WITHOUT pre-stage should use the image rejection formula for FsRaw
+	// FsRaw = 2 - (Fp1 + (Fs1 - Fp1) * 0.7)
+	assert.Less(t, downNoPreParams.FsRaw, 2.0, "Downsampling without pre-stage FsRaw should be < 2.0")
 
 	t.Logf("Upsampling (44.1k→48k): Fn=%.3f, FsRaw=%.3f, Fs=%.3f, Fc=%.6f",
 		upParams.Fn, upParams.FsRaw, upParams.Fs, upParams.Fc)
-	t.Logf("Downsampling (48k→44.1k): Fn=%.3f, FsRaw=%.3f, Fs=%.3f, Fc=%.6f",
-		downParams.Fn, downParams.FsRaw, downParams.Fs, downParams.Fc)
+	t.Logf("Downsampling no pre-stage (48k→44.1k): Fn=%.3f, FsRaw=%.3f, Fs=%.3f, Fc=%.6f",
+		downNoPreParams.Fn, downNoPreParams.FsRaw, downNoPreParams.Fs, downNoPreParams.Fc)
+	t.Logf("Downsampling with pre-stage (48k→44.1k): Fn=%.3f, FsRaw=%.3f, Fs=%.3f, Fc=%.6f",
+		downWithPreParams.Fn, downWithPreParams.FsRaw, downWithPreParams.Fs, downWithPreParams.Fc)
 }
 
 // =============================================================================
@@ -381,7 +428,7 @@ func TestPolyphaseStage_Constructor(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.desc, func(t *testing.T) {
-			stage, err := NewPolyphaseStage[float64](tc.ratio, tc.totalIORatio, QualityHigh)
+			stage, err := NewPolyphaseStage[float64](tc.ratio, tc.totalIORatio, true, QualityHigh)
 			if tc.expectError {
 				require.Error(t, err)
 				assert.Nil(t, stage)
@@ -398,7 +445,7 @@ func TestPolyphaseStage_Constructor(t *testing.T) {
 
 func TestPolyphaseStage_DCGain(t *testing.T) {
 	// Test that DC signals pass through with gain ≈ 1.0
-	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
 	require.NoError(t, err)
 
 	// Generate DC signal
@@ -442,7 +489,7 @@ func TestPolyphaseStage_OutputRatio(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.desc, func(t *testing.T) {
-			stage, err := NewPolyphaseStage[float64](tc.ratio, tc.totalIORatio, QualityHigh)
+			stage, err := NewPolyphaseStage[float64](tc.ratio, tc.totalIORatio, true, QualityHigh)
 			require.NoError(t, err)
 
 			numSamples := 10000

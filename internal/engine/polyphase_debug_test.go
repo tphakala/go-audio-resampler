@@ -11,7 +11,7 @@ func TestPolyphaseFilterResponse(t *testing.T) {
 	ratio := 96000.0 / 88200.0
 	totalIORatio := 44100.0 / 96000.0
 
-	stage, err := NewPolyphaseStage[float64](ratio, totalIORatio, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](ratio, totalIORatio, true, QualityHigh)
 	if err != nil {
 		t.Fatalf("Failed to create polyphase stage: %v", err)
 	}

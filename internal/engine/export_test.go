@@ -7,8 +7,8 @@ package engine
 // exported directly from polyphase.go for better testability.
 
 // ExportedDesignPolyphaseFilter wraps designPolyphaseFilter for testing
-func ExportedDesignPolyphaseFilter(numPhases int, ratio, totalIORatio float64, quality Quality) (*PolyphaseFilterResult, error) {
-	result, err := designPolyphaseFilter(numPhases, ratio, totalIORatio, quality)
+func ExportedDesignPolyphaseFilter(numPhases int, ratio, totalIORatio float64, hasPreStage bool, quality Quality) (*PolyphaseFilterResult, error) {
+	result, err := designPolyphaseFilter(numPhases, ratio, totalIORatio, hasPreStage, quality)
 	if err != nil {
 		return nil, err
 	}

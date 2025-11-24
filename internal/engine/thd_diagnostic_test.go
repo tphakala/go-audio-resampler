@@ -270,7 +270,7 @@ func TestPolyphaseStage_THD_Isolation(t *testing.T) {
 
 	// Create polyphase stage directly (normally used after DFT pre-stage)
 	totalIORatio := 1.0 / ratio
-	polyStage, err := NewPolyphaseStage[float64](ratio, totalIORatio, QualityHigh)
+	polyStage, err := NewPolyphaseStage[float64](ratio, totalIORatio, true, QualityHigh)
 	if err != nil {
 		t.Fatalf("Failed to create polyphase stage: %v", err)
 	}

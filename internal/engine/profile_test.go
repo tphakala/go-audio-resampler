@@ -28,7 +28,7 @@ func BenchmarkPolyphaseStage_Only(b *testing.B) {
 	// Ratio for 88200 -> 48000 (after 2x upsample)
 	ratio := 48000.0 / 88200.0
 	// For standalone test, use ratio as totalIORatio
-	stage, err := NewPolyphaseStage[float64](ratio, ratio, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](ratio, ratio, true, QualityHigh)
 	if err != nil {
 		b.Fatal(err)
 	}

@@ -36,7 +36,7 @@ func TestDFTStage_EmptyInput(t *testing.T) {
 
 // TestPolyphaseStage_EmptyInput verifies PolyphaseStage handles empty input correctly.
 func TestPolyphaseStage_EmptyInput(t *testing.T) {
-	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
 	require.NoError(t, err)
 
 	output, err := stage.Process([]float64{})
@@ -125,7 +125,7 @@ func TestDFTStage_SingleSample(t *testing.T) {
 
 // TestPolyphaseStage_SingleSample verifies PolyphaseStage handles single sample input.
 func TestPolyphaseStage_SingleSample(t *testing.T) {
-	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
 	require.NoError(t, err)
 
 	// Single sample input
@@ -187,7 +187,7 @@ func TestDFTStage_SmallBuffers(t *testing.T) {
 
 // TestPolyphaseStage_SmallBuffers verifies PolyphaseStage handles various small buffer sizes.
 func TestPolyphaseStage_SmallBuffers(t *testing.T) {
-	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
 	require.NoError(t, err)
 
 	sizes := []int{1, 2, 3, 5, 10, 16, 32, 64, 100}
@@ -257,7 +257,7 @@ func TestDFTStage_NilInput(t *testing.T) {
 
 // TestPolyphaseStage_NilInput verifies PolyphaseStage handles nil input correctly.
 func TestPolyphaseStage_NilInput(t *testing.T) {
-	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
 	require.NoError(t, err)
 
 	output, err := stage.Process(nil)
@@ -315,7 +315,7 @@ func TestDFTStage_DCSignal(t *testing.T) {
 
 // TestPolyphaseStage_DCSignal verifies PolyphaseStage correctly handles DC signals.
 func TestPolyphaseStage_DCSignal(t *testing.T) {
-	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, QualityHigh)
+	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
 	require.NoError(t, err)
 
 	// DC signal at 1.0
@@ -478,7 +478,7 @@ func TestNewPolyphaseStage_InvalidRatio(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			stage, err := NewPolyphaseStage[float64](tc.ratio, 0.5, QualityHigh)
+			stage, err := NewPolyphaseStage[float64](tc.ratio, 0.5, true, QualityHigh)
 			if tc.wantErr {
 				require.Error(t, err, "Should reject ratio %f", tc.ratio)
 				assert.Nil(t, stage)
