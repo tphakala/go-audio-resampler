@@ -3,9 +3,11 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/tphakala/go-audio-resampler.svg)](https://pkg.go.dev/github.com/tphakala/go-audio-resampler)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tphakala/go-audio-resampler)](https://goreportcard.com/report/github.com/tphakala/go-audio-resampler)
 
-**Pure Go** high-quality audio resampling library with **no CGO dependencies**, based on [libsoxr](https://sourceforge.net/projects/soxr/) (the SoX Resampler library) by Rob Sykes.
+The **only pure Go** high-quality audio resampling library - **no CGO dependencies** required.
 
-> **Cross-platform compatible** - Works on Linux, macOS, Windows, and any platform supported by Go. No C compiler or external libraries required.
+Based on [libsoxr](https://sourceforge.net/projects/soxr/) (the SoX Resampler library) by Rob Sykes, this is a complete Go reimplementation delivering professional-grade quality without any C code or external dependencies.
+
+> **Why Pure Go matters:** Unlike CGO-based wrappers, this library compiles instantly, cross-compiles effortlessly, and runs anywhere Go runs - Linux, macOS, Windows, ARM, WebAssembly, and more. No C compiler, no linking headaches, no platform-specific builds.
 
 The library implements polyphase FIR filtering with Kaiser window design for professional-grade sample rate conversion, following the multi-stage architecture that makes libsoxr one of the highest-quality resamplers available.
 
