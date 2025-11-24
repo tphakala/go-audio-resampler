@@ -23,14 +23,14 @@ import (
 
 // soxrReferenceData holds pre-computed soxr reference values
 type soxrReferenceData struct {
-	AntiAliasing map[string]float64                    `json:"antialiasing"`
-	Quality      map[string]json.RawMessage            `json:"quality"`
+	AntiAliasing map[string]float64         `json:"antialiasing"`
+	Quality      map[string]json.RawMessage `json:"quality"`
 }
 
 var (
 	staticRefData     *soxrReferenceData
 	staticRefDataOnce sync.Once
-	staticRefDataErr  error
+	errStaticRefData  error
 )
 
 // loadStaticReferenceData loads pre-computed soxr reference data from JSON
@@ -38,25 +38,25 @@ func loadStaticReferenceData() (*soxrReferenceData, error) {
 	staticRefDataOnce.Do(func() {
 		_, currentFile, _, ok := runtime.Caller(0)
 		if !ok {
-			staticRefDataErr = fmt.Errorf("failed to get current file path")
+			errStaticRefData = fmt.Errorf("failed to get current file path")
 			return
 		}
 
 		dataPath := filepath.Join(filepath.Dir(currentFile), "testdata", "soxr_reference_data.json")
 		data, err := os.ReadFile(dataPath)
 		if err != nil {
-			staticRefDataErr = fmt.Errorf("failed to read reference data: %w", err)
+			errStaticRefData = fmt.Errorf("failed to read reference data: %w", err)
 			return
 		}
 
 		staticRefData = &soxrReferenceData{}
 		if err := json.Unmarshal(data, staticRefData); err != nil {
-			staticRefDataErr = fmt.Errorf("failed to parse reference data: %w", err)
+			errStaticRefData = fmt.Errorf("failed to parse reference data: %w", err)
 			return
 		}
 	})
 
-	return staticRefData, staticRefDataErr
+	return staticRefData, errStaticRefData
 }
 
 // Quality comparison tests between Go resampler and soxr reference
@@ -248,8 +248,8 @@ type THDResult struct {
 	OutputRate    float64
 	TestFrequency float64
 	FundamentalDB float64
-	THD_DB        float64 // THD in dB (negative is better)
-	THD_Percent   float64 // THD as percentage
+	THD_DB        float64   // THD in dB (negative is better)
+	THD_Percent   float64   // THD as percentage
 	Harmonics     []float64 // Harmonic levels in dB
 }
 
@@ -290,7 +290,7 @@ func measureTHD(inputRate, outputRate, testFreq float64, quality Quality) (*THDR
 	}
 
 	fftIn := make([]complex128, fftSize)
-	for i := 0; i < fftSize; i++ {
+	for i := range fftSize {
 		window := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
 		fftIn[i] = complex(output[i]*window, 0)
 	}
@@ -449,7 +449,7 @@ func measureSNR(inputRate, outputRate, testFreq float64, quality Quality) (*SNRR
 	}
 
 	fftIn := make([]complex128, fftSize)
-	for i := 0; i < fftSize; i++ {
+	for i := range fftSize {
 		window := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
 		fftIn[i] = complex(output[i]*window, 0)
 	}
@@ -775,9 +775,9 @@ func getSoxrPassbandRipple(inputRate, outputRate float64) (*PassbandRippleResult
 		key := fmt.Sprintf("ripple_%.0f_%.0f", inputRate, outputRate)
 		if raw, ok := refData.Quality[key]; ok {
 			var data struct {
-				Ripple  float64 `json:"ripple"`
-				MaxDev  float64 `json:"max_dev"`
-				MinDev  float64 `json:"min_dev"`
+				Ripple float64 `json:"ripple"`
+				MaxDev float64 `json:"max_dev"`
+				MinDev float64 `json:"min_dev"`
 			}
 			if json.Unmarshal(raw, &data) == nil {
 				return &PassbandRippleResult{
@@ -883,11 +883,11 @@ func getSoxrImpulse(inputRate, outputRate float64) (*ImpulseResult, error) {
 			}
 			if json.Unmarshal(raw, &data) == nil {
 				return &ImpulseResult{
-					InputRate:       inputRate,
-					OutputRate:      outputRate,
-					PreRingingDB:    data.PreRingingDB,
-					PostRingingDB:   data.PostRingingDB,
-					RingoutSamples:  data.RingoutSamples,
+					InputRate:      inputRate,
+					OutputRate:     outputRate,
+					PreRingingDB:   data.PreRingingDB,
+					PostRingingDB:  data.PostRingingDB,
+					RingoutSamples: data.RingoutSamples,
 				}, nil
 			}
 		}
@@ -900,11 +900,11 @@ func getSoxrImpulse(inputRate, outputRate float64) (*ImpulseResult, error) {
 	}
 
 	return &ImpulseResult{
-		InputRate:       inputRate,
-		OutputRate:      outputRate,
-		PreRingingDB:    result["pre_ringing_db"],
-		PostRingingDB:   result["post_ringing_db"],
-		RingoutSamples:  int(result["ringout_samples"]),
+		InputRate:      inputRate,
+		OutputRate:     outputRate,
+		PreRingingDB:   result["pre_ringing_db"],
+		PostRingingDB:  result["post_ringing_db"],
+		RingoutSamples: int(result["ringout_samples"]),
 	}, nil
 }
 

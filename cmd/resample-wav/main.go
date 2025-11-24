@@ -607,7 +607,7 @@ func (w *fastWAVWriter) writeHeader() error {
 
 	// fmt subchunk
 	copy(header[12:16], "fmt ")
-	binary.LittleEndian.PutUint32(header[16:20], wavPCMSubchunkSize)    // Subchunk1Size (16 for PCM)
+	binary.LittleEndian.PutUint32(header[16:20], wavPCMSubchunkSize)   // Subchunk1Size (16 for PCM)
 	binary.LittleEndian.PutUint16(header[20:22], 1)                    // AudioFormat (1 = PCM)
 	binary.LittleEndian.PutUint16(header[22:24], uint16(w.channels))   // NumChannels
 	binary.LittleEndian.PutUint32(header[24:28], uint32(w.sampleRate)) // SampleRate

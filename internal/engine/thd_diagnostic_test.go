@@ -71,7 +71,7 @@ func TestDFTStage_THD_Isolation(t *testing.T) {
 	}
 
 	fftIn := make([]complex128, fftSize)
-	for i := 0; i < fftSize; i++ {
+	for i := range fftSize {
 		window := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
 		fftIn[i] = complex(output[i]*window, 0)
 	}
@@ -117,7 +117,7 @@ func TestDFTStage_THD_Isolation(t *testing.T) {
 
 	// Compare with soxr reference for this ratio
 	t.Logf("soxr reference: -142.80 dB")
-	t.Logf("Gap: %.2f dB", thdDB - (-142.80))
+	t.Logf("Gap: %.2f dB", thdDB-(-142.80))
 }
 
 // TestDFTStage_CoefficientAnalysis analyzes the DFT filter coefficients
@@ -218,7 +218,7 @@ func TestDFTStage_HalfBandDisabled(t *testing.T) {
 	}
 
 	fftIn := make([]complex128, fftSize)
-	for i := 0; i < fftSize; i++ {
+	for i := range fftSize {
 		window := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
 		fftIn[i] = complex(output[i]*window, 0)
 	}
@@ -307,7 +307,7 @@ func TestPolyphaseStage_THD_Isolation(t *testing.T) {
 	}
 
 	fftIn := make([]complex128, fftSize)
-	for i := 0; i < fftSize; i++ {
+	for i := range fftSize {
 		window := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
 		fftIn[i] = complex(output[i]*window, 0)
 	}
@@ -547,18 +547,26 @@ func TestDFTStage_OutputPattern(t *testing.T) {
 
 	for i := 400; i < 600 && i < len(output); i++ {
 		if i%2 == 0 {
-			if output[i] > phase0Max { phase0Max = output[i] }
-			if output[i] < phase0Min { phase0Min = output[i] }
+			if output[i] > phase0Max {
+				phase0Max = output[i]
+			}
+			if output[i] < phase0Min {
+				phase0Min = output[i]
+			}
 		} else {
-			if output[i] > phase1Max { phase1Max = output[i] }
-			if output[i] < phase1Min { phase1Min = output[i] }
+			if output[i] > phase1Max {
+				phase1Max = output[i]
+			}
+			if output[i] < phase1Min {
+				phase1Min = output[i]
+			}
 		}
 	}
 
 	t.Logf("Phase 0 range: [%.6f, %.6f]", phase0Min, phase0Max)
 	t.Logf("Phase 1 range: [%.6f, %.6f]", phase1Min, phase1Max)
-	t.Logf("Phase 0 amplitude: %.6f", (phase0Max - phase0Min) / 2)
-	t.Logf("Phase 1 amplitude: %.6f", (phase1Max - phase1Min) / 2)
+	t.Logf("Phase 0 amplitude: %.6f", (phase0Max-phase0Min)/2)
+	t.Logf("Phase 1 amplitude: %.6f", (phase1Max-phase1Min)/2)
 }
 
 // TestDFTStage_ConvolutionOrder checks if coefficient reversal is correct
@@ -608,7 +616,7 @@ func TestDFTStage_ConvolutionOrder(t *testing.T) {
 
 	// Check if response alternates (interleaved phases)
 	t.Log("\nChecking interleave pattern around peak:")
-	for i := maxIdx - 10; i <= maxIdx + 10 && i >= 0 && i < len(output); i++ {
+	for i := maxIdx - 10; i <= maxIdx+10 && i >= 0 && i < len(output); i++ {
 		phase := i % 2
 		t.Logf("  [%d] phase=%d value=%.6f", i, phase, output[i])
 	}
@@ -652,13 +660,13 @@ func TestDFTStage_ManualConvolution(t *testing.T) {
 	outIdx := 0
 	for i := tapsPerPhase - 1; i < len(input); i++ {
 		// For each input sample, produce 'factor' output samples
-		for phase := 0; phase < factor; phase++ {
+		for phase := range factor {
 			// Manual convolution with pre-reversed coefficients
 			sum := 0.0
 			coeffs := dftStage.polyCoeffs[phase]
 			histStart := i - (tapsPerPhase - 1)
 
-			for j := 0; j < tapsPerPhase; j++ {
+			for j := range tapsPerPhase {
 				sum += coeffs[j] * history[histStart+j+tapsPerPhase-1]
 			}
 
@@ -679,7 +687,7 @@ func TestDFTStage_ManualConvolution(t *testing.T) {
 	}
 
 	fftIn := make([]complex128, fftSize)
-	for i := 0; i < fftSize; i++ {
+	for i := range fftSize {
 		window := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
 		fftIn[i] = complex(output[i]*window, 0)
 	}
@@ -740,8 +748,8 @@ func TestDFTStage_DirectUpsample(t *testing.T) {
 	totalTaps := tapsPerPhase * factor
 	prototype := make([]float64, totalTaps)
 
-	for phase := 0; phase < factor; phase++ {
-		for tap := 0; tap < tapsPerPhase; tap++ {
+	for phase := range factor {
+		for tap := range tapsPerPhase {
 			protoIdx := tap*factor + phase
 			if protoIdx < totalTaps {
 				// Un-reverse and un-scale
@@ -762,7 +770,7 @@ func TestDFTStage_DirectUpsample(t *testing.T) {
 
 	for i := 0; i < len(output); i++ {
 		sum := 0.0
-		for j := 0; j < filterLen; j++ {
+		for j := range filterLen {
 			sum += stuffed[i+j] * prototype[filterLen-1-j] // Note: prototype is not reversed for proper conv
 		}
 		output[i] = sum * float64(factor) // Scale for upsampling
@@ -778,7 +786,7 @@ func TestDFTStage_DirectUpsample(t *testing.T) {
 	}
 
 	fftIn := make([]complex128, fftSize)
-	for i := 0; i < fftSize; i++ {
+	for i := range fftSize {
 		window := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
 		fftIn[i] = complex(output[i]*window, 0)
 	}
@@ -827,7 +835,7 @@ func TestIdentityResample(t *testing.T) {
 
 	// Compute THD of input (should be limited only by FFT precision)
 	fftIn := make([]complex128, fftSize)
-	for i := 0; i < fftSize; i++ {
+	for i := range fftSize {
 		window := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
 		fftIn[i] = complex(input[i]*window, 0)
 	}
@@ -904,11 +912,11 @@ func TestDFTStage_THDComparison(t *testing.T) {
 	goOutput := make([]float64, numInputProcessable*factor)
 
 	outIdx := 0
-	for i := 0; i < numInputProcessable; i++ {
-		for phase := 0; phase < factor; phase++ {
+	for i := range numInputProcessable {
+		for phase := range factor {
 			sum := 0.0
 			coeffs := dftStage.polyCoeffs[phase]
-			for j := 0; j < tapsPerPhase; j++ {
+			for j := range tapsPerPhase {
 				sum += input[i+j] * float64(coeffs[j])
 			}
 			goOutput[outIdx] = sum
@@ -920,7 +928,7 @@ func TestDFTStage_THDComparison(t *testing.T) {
 	t.Logf("Go output length: %d", len(goOutput))
 
 	// Compare first few samples to verify they match
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		diff := simdOutput[i] - goOutput[i]
 		if math.Abs(diff) > 1e-10 {
 			t.Logf("WARNING: Sample %d differs: SIMD=%.10f, Go=%.10f, diff=%.2e",
@@ -929,9 +937,9 @@ func TestDFTStage_THDComparison(t *testing.T) {
 	}
 
 	// Helper function to compute THD
-	computeTHD := func(output []float64, name string) float64 {
+	computeTHD := func(output []float64) float64 {
 		fftIn := make([]complex128, fftSize)
-		for i := 0; i < fftSize; i++ {
+		for i := range fftSize {
 			window := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
 			fftIn[i] = complex(output[i]*window, 0)
 		}
@@ -961,8 +969,8 @@ func TestDFTStage_THDComparison(t *testing.T) {
 		return thdDB
 	}
 
-	simdTHD := computeTHD(simdOutput, "SIMD")
-	goTHD := computeTHD(goOutput, "Pure Go")
+	simdTHD := computeTHD(simdOutput)
+	goTHD := computeTHD(goOutput)
 
 	t.Logf("SIMD (DFT stage) THD: %.2f dB", simdTHD)
 	t.Logf("Pure Go THD: %.2f dB", goTHD)
@@ -985,7 +993,7 @@ func TestDFTStage_THDComparison(t *testing.T) {
 
 		// Check DC gain of each phase
 		t.Log("\nPhase DC gains:")
-		for phase := 0; phase < factor; phase++ {
+		for phase := range factor {
 			sum := 0.0
 			for _, c := range dftStage.polyCoeffs[phase] {
 				sum += float64(c)
@@ -995,9 +1003,9 @@ func TestDFTStage_THDComparison(t *testing.T) {
 
 		// Manual convolution of first position for debugging
 		t.Log("\nManual check of first output:")
-		for phase := 0; phase < factor; phase++ {
+		for phase := range factor {
 			sum := 0.0
-			for j := 0; j < tapsPerPhase; j++ {
+			for j := range tapsPerPhase {
 				sum += input[j] * float64(dftStage.polyCoeffs[phase][j])
 			}
 			t.Logf("  Phase %d, pos 0: manual=%.6f, SIMD output[%d]=%.6f, Go output[%d]=%.6f",
@@ -1006,13 +1014,13 @@ func TestDFTStage_THDComparison(t *testing.T) {
 
 		// Check first few input samples
 		t.Log("\nFirst 5 input samples:")
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			t.Logf("  input[%d] = %.6f", i, input[i])
 		}
 
 		// Check first few phase 0 coefficients
 		t.Log("\nFirst 5 phase 0 coefficients:")
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			t.Logf("  polyCoeffs[0][%d] = %.10f", i, dftStage.polyCoeffs[0][i])
 		}
 	}
@@ -1044,7 +1052,7 @@ func TestDFTStage_ProcessChunkedBug(t *testing.T) {
 	t.Logf("Input samples: %d", numSamples)
 	t.Logf("numInputProcessable: %d", numSamples-tapsPerPhase+1)
 	t.Logf("l2CacheChunkSize: 4096")
-	t.Logf("Using processChunked: %v", numSamples-tapsPerPhase+1 > 4096)
+	t.Logf("Using processChunked: %v", numSamples-tapsPerPhase >= 4096)
 
 	// Process with DFT stage (including Flush, just like THDComparison)
 	simdOutput, err := dftStage.Process(input)
@@ -1059,11 +1067,11 @@ func TestDFTStage_ProcessChunkedBug(t *testing.T) {
 	goOutput := make([]float64, numInputProcessable*factor)
 
 	outIdx := 0
-	for i := 0; i < numInputProcessable; i++ {
-		for phase := 0; phase < factor; phase++ {
+	for i := range numInputProcessable {
+		for phase := range factor {
 			sum := 0.0
 			coeffs := dftStage.polyCoeffs[phase]
-			for j := 0; j < tapsPerPhase; j++ {
+			for j := range tapsPerPhase {
 				sum += input[i+j] * float64(coeffs[j])
 			}
 			goOutput[outIdx] = sum
@@ -1145,14 +1153,14 @@ func TestDFTStage_DirectComparison(t *testing.T) {
 	goOutput := make([]float64, numInputProcessable*factor)
 
 	outIdx := 0
-	for i := 0; i < numInputProcessable; i++ {
+	for i := range numInputProcessable {
 		// For each input position, produce 'factor' output samples
-		for phase := 0; phase < factor; phase++ {
+		for phase := range factor {
 			sum := 0.0
 			coeffs := dftStage.polyCoeffs[phase]
 			// ConvolveValid does: dst[i] = sum(signal[i+j] * kernel[j])
 			// So for output i, we need signal[i:i+tapsPerPhase]
-			for j := 0; j < tapsPerPhase; j++ {
+			for j := range tapsPerPhase {
 				sum += input[i+j] * float64(coeffs[j])
 			}
 			goOutput[outIdx] = sum
@@ -1170,7 +1178,7 @@ func TestDFTStage_DirectComparison(t *testing.T) {
 
 	maxDiff := 0.0
 	maxDiffIdx := 0
-	for i := 0; i < compareLen; i++ {
+	for i := range compareLen {
 		diff := simdOutput[i] - goOutput[i]
 		if math.Abs(diff) > math.Abs(maxDiff) {
 			maxDiff = diff

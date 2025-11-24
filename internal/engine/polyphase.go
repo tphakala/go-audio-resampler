@@ -791,7 +791,12 @@ func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
 	s.at = at % numPhases
 
 	s.samplesOut += int64(len(output))
-	return output, nil
+
+	// Return a copy to prevent caller's slice from being corrupted
+	// if they call Process() or Flush() again (which reuses s.outputBuf)
+	result := make([]F, len(output))
+	copy(result, output)
+	return result, nil
 }
 
 // Flush returns any remaining buffered samples.
