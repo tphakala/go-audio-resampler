@@ -661,5 +661,5 @@ func precisionMeasureSNR(output []float64, testFreq, sampleRate float64) float64
 		return 200
 	}
 
-	return 10 * math.Log10(signalPower / noisePower)
+	return 10 * math.Log10(signalPower/noisePower)
 }

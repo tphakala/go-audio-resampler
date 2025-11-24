@@ -35,8 +35,8 @@ func TestIsIntegerRatio(t *testing.T) {
 
 		// Edge cases
 		{0.0, false, "zero"},
-		{0.999999, false, "almost_1_far"},   // Far enough from 1 to not round
-		{0.9999999999, true, "almost_1"},    // Rounds to 1 within tolerance
+		{0.999999, false, "almost_1_far"}, // Far enough from 1 to not round
+		{0.9999999999, true, "almost_1"},  // Rounds to 1 within tolerance
 		{1.0000000001, true, "just_over_1"},
 	}
 
@@ -169,10 +169,11 @@ func TestLsxInvFResp_MonotonicBehavior(t *testing.T) {
 // is correctly applied based on upsampling/downsampling AND presence of pre-stage.
 //
 // From soxr cr.c lines 429-431:
-//   if (!upsample && preM)
-//     Fn = 2 * mult, Fs = 3 + fabs(Fs1 - 1);
-//   else
-//     Fn = 1, Fs = 2 - (mode? Fp1 + (Fs1 - Fp1) * .7 : Fs1);
+//
+//	if (!upsample && preM)
+//	  Fn = 2 * mult, Fs = 3 + fabs(Fs1 - 1);
+//	else
+//	  Fn = 1, Fs = 2 - (mode? Fp1 + (Fs1 - Fp1) * .7 : Fs1);
 //
 // Key insight: Fn=2*mult is ONLY used when downsampling WITH a pre-stage.
 // For downsampling WITHOUT pre-stage (our Go architecture), Fn=1.
@@ -620,10 +621,10 @@ func TestQualityToAttenuation(t *testing.T) {
 		expectedAtten float64
 	}{
 		// Attenuation = (bits + 1) * 6.0206 dB
-		{QualityLow, (16 + 1) * 6.0206},      // 102.35 dB
-		{QualityMedium, (16 + 1) * 6.0206},   // 102.35 dB (same bits as Low)
-		{QualityHigh, (20 + 1) * 6.0206},     // 126.43 dB
-		{Quality(999), (20 + 1) * 6.0206},    // Unknown defaults to High
+		{QualityLow, (16 + 1) * 6.0206},    // 102.35 dB
+		{QualityMedium, (16 + 1) * 6.0206}, // 102.35 dB (same bits as Low)
+		{QualityHigh, (20 + 1) * 6.0206},   // 126.43 dB
+		{Quality(999), (20 + 1) * 6.0206},  // Unknown defaults to High
 	}
 
 	for _, tc := range testCases {

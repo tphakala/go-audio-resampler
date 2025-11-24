@@ -313,9 +313,9 @@ func benchCubicInterpolation(b *testing.B, tapsPerPhase int) {
 	for i := range tapsPerPhase {
 		t := float64(i) / float64(tapsPerPhase)
 		coeffsA[i] = math.Sin(t * math.Pi)
-		coeffsB[i] = 0.1 * math.Cos(t * math.Pi)
-		coeffsC[i] = 0.01 * math.Sin(2 * t * math.Pi)
-		coeffsD[i] = 0.001 * math.Cos(2 * t * math.Pi)
+		coeffsB[i] = 0.1 * math.Cos(t*math.Pi)
+		coeffsC[i] = 0.01 * math.Sin(2*t*math.Pi)
+		coeffsD[i] = 0.001 * math.Cos(2*t*math.Pi)
 		hist[i] = math.Sin(float64(i) * 0.1)
 	}
 
@@ -357,9 +357,9 @@ func BenchmarkFunc_CubicInterpolation_64Taps_Unrolled4(b *testing.B) {
 	for i := range tapsPerPhase {
 		t := float64(i) / float64(tapsPerPhase)
 		coeffsA[i] = math.Sin(t * math.Pi)
-		coeffsB[i] = 0.1 * math.Cos(t * math.Pi)
-		coeffsC[i] = 0.01 * math.Sin(2 * t * math.Pi)
-		coeffsD[i] = 0.001 * math.Cos(2 * t * math.Pi)
+		coeffsB[i] = 0.1 * math.Cos(t*math.Pi)
+		coeffsC[i] = 0.01 * math.Sin(2*t*math.Pi)
+		coeffsD[i] = 0.001 * math.Cos(2*t*math.Pi)
 		hist[i] = math.Sin(float64(i) * 0.1)
 	}
 

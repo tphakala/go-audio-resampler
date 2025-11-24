@@ -378,13 +378,13 @@ func TestQualityPresets_ComprehensiveSummary(t *testing.T) {
 	t.Log("")
 
 	type summaryRow struct {
-		preset    string
-		soxrTHD   float64
-		goTHD     float64
-		soxrSNR   float64
-		goSNR     float64
-		thdMatch  bool
-		snrMatch  bool
+		preset   string
+		soxrTHD  float64
+		goTHD    float64
+		soxrSNR  float64
+		goSNR    float64
+		thdMatch bool
+		snrMatch bool
 	}
 
 	summary := make([]summaryRow, 0, len(qualityPresets))

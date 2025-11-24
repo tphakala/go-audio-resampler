@@ -334,10 +334,10 @@ const (
 	// Cubic interpolation constants for Catmull-Rom style coefficient interpolation.
 	// Used in NewPolyphaseStage to compute smooth interpolation between phases.
 	// Formula: f(x) = a + b*x + c*x² + d*x³
-	cubicPhaseOffset    = 2   // Offset to get f2 (two phases ahead)
-	cubicCenterCoeff    = 0.5 // Coefficient for computing c: c = 0.5*(f1+fm1) - f0
-	cubicDivisor        = 6.0 // Divisor for computing d: d = (1/6) * (...)
-	cubicCMultiplier    = 4.0 // Multiplier for c in d formula: d = (1/6)*(f2-f1+fm1-f0 - 4*c)
+	cubicPhaseOffset = 2   // Offset to get f2 (two phases ahead)
+	cubicCenterCoeff = 0.5 // Coefficient for computing c: c = 0.5*(f1+fm1) - f0
+	cubicDivisor     = 6.0 // Divisor for computing d: d = (1/6) * (...)
+	cubicCMultiplier = 4.0 // Multiplier for c in d formula: d = (1/6)*(f2-f1+fm1-f0 - 4*c)
 )
 
 // qualityToAttenuation returns stopband attenuation for quality level.
@@ -1365,8 +1365,8 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, ha
 
 		// Scale max taps per phase with attenuation to respect quality differences.
 		// These thresholds allow higher quality to use more taps.
-		lowQualityAttenuation     = 110.0 // ~16-bit, ~102 dB
-		highQualityAttenuation    = 130.0 // ~20-bit, ~126 dB
+		lowQualityAttenuation      = 110.0 // ~16-bit, ~102 dB
+		highQualityAttenuation     = 130.0 // ~20-bit, ~126 dB
 		veryHighQualityAttenuation = 160.0 // ~28-bit, ~175 dB
 
 		maxTapsLowQuality      = 32  // Max taps per phase for low quality
