@@ -1,18 +1,21 @@
-// Package resampler provides high-quality audio resampling in pure Go.
+// Package resampler provides the only pure Go high-quality audio resampling library.
 //
-// This library is based on libsoxr (the SoX Resampler library) by Rob Sykes,
-// implementing polyphase FIR filtering with Kaiser window design for
-// professional-grade sample rate conversion.
+// This library is a complete Go reimplementation based on libsoxr (the SoX Resampler
+// library) by Rob Sykes, delivering professional-grade sample rate conversion with
+// no CGO dependencies. It works anywhere Go runs: Linux, macOS, Windows, ARM,
+// WebAssembly, and more.
 //
 // # Features
 //
+//   - 100% Pure Go - No CGO, no external C libraries, cross-compiles effortlessly
 //   - Multiple quality presets from quick/low-latency to very high quality mastering
-//   - Polyphase FIR filtering with efficient multi-stage architecture
+//   - Selectable float32/float64 precision paths with type-safe SIMD operations
+//   - Polyphase FIR filtering with cubic coefficient interpolation
 //   - Kaiser window design for optimal stopband attenuation
-//   - Optional SIMD acceleration (AVX2/SSE) via github.com/tphakala/simd
-//   - Multi-channel support for stereo, surround, and multi-channel audio
+//   - SIMD acceleration (AVX2/SSE) via github.com/tphakala/simd for both precisions
+//   - Multi-channel support for stereo, surround, and multi-channel audio (up to 256 channels)
 //   - Streaming API for processing audio in chunks with proper state management
-//   - Pure Go implementation with no CGO dependencies
+//   - Quality validated against libsoxr reference implementation
 //
 // # Quick Start
 //
@@ -52,13 +55,14 @@
 //
 // The library provides several quality presets for common use cases:
 //
-//   - [QualityQuick]: 8-bit precision, lowest CPU usage. Suitable for preview
+//   - [QualityQuick]: 8-bit precision (~54 dB), lowest CPU usage. Suitable for preview
 //     or real-time with low CPU.
-//   - [QualityLow]: 16-bit precision. Good for speech and low-bandwidth audio.
-//   - [QualityMedium]: 16-bit precision. Suitable for general music playback.
-//   - [QualityHigh]: 24-bit precision. Recommended for studio production and
-//     high-quality streaming.
-//   - [QualityVeryHigh]: 32-bit precision. For mastering and archival applications.
+//   - [QualityLow]: 16-bit precision (~102 dB). Good for speech and low-bandwidth audio.
+//   - [QualityMedium]: 16-bit precision (~102 dB). Suitable for general music playback.
+//   - [QualityHigh]: 20-bit precision (~126 dB). Recommended for studio production and
+//     high-quality streaming. Matches libsoxr HQ preset.
+//   - [QualityVeryHigh]: 28-bit precision (~175 dB). For mastering and archival applications.
+//     Matches libsoxr VHQ preset.
 //
 // Custom quality settings can be specified using [QualitySpec] with
 // [QualityCustom] preset.
@@ -84,7 +88,8 @@
 // Integer ratios (2x, 3x) use efficient single-stage processing, while
 // non-integer ratios (44.1kHz→48kHz) use DFT pre-upsampling combined with
 // a polyphase stage. Polyphase decomposition reduces computation by processing
-// only the needed output phases.
+// only the needed output phases. Cubic coefficient interpolation provides
+// smooth sub-phase transitions for excellent high-frequency THD performance.
 //
 // # Stereo Processing
 //
