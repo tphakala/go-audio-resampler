@@ -63,7 +63,7 @@ func measureGoThroughput(inputRate, outputRate float64, quality Quality, numSamp
 	var totalInputSamples, totalOutputSamples int64
 
 	start := time.Now()
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		resampler, err := NewResampler[float64](inputRate, outputRate, quality)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create resampler: %w", err)
@@ -121,7 +121,7 @@ func measureGoThroughputReuse(inputRate, outputRate float64, quality Quality, nu
 	var totalInputSamples, totalOutputSamples int64
 
 	start := time.Now()
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		output, err := resampler.Process(input)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process: %w", err)
@@ -343,7 +343,7 @@ func TestThroughput_Summary(t *testing.T) {
 		reuseRatio float64
 	}
 
-	var summary []summaryRow
+	summary := make([]summaryRow, 0, len(qualityPresets))
 
 	for _, preset := range qualityPresets {
 		row := summaryRow{quality: preset.name}
@@ -415,6 +415,7 @@ func BenchmarkThroughput_VeryHigh_48kTo96k(b *testing.B) {
 }
 
 func benchmarkThroughput(b *testing.B, inputRate, outputRate float64, quality Quality) {
+	b.Helper()
 	numSamples := int(inputRate) // 1 second of audio
 
 	// Generate test signal

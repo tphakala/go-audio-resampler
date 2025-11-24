@@ -473,7 +473,7 @@ func measurePassbandRippleInternal(t *testing.T, inputRate, outputRate float64, 
 	fftOut := fft(fftIn)
 
 	// Measure levels at each frequency
-	var levels []float64
+	levels := make([]float64, 0, len(testFreqs))
 	sum := 0.0
 	for _, freq := range testFreqs {
 		bin := int(freq / outputRate * float64(fftSize))

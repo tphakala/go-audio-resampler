@@ -933,25 +933,15 @@ func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
 			break
 		}
 
-		// Convolve with cubic coefficient interpolation
-		// For each tap: interpolated_coef = a + x*(b + x*(c + x*d))
-		// Then: sum += interpolated_coef * input[tap]
+		// Convolve with cubic coefficient interpolation using SIMD
+		// Computes: sum = Σ hist[i] * (a[i] + x*(b[i] + x*(c[i] + x*d[i])))
 		coeffsA := polyCoeffs[phase]
 		coeffsB := polyCoeffsB[phase]
 		coeffsC := polyCoeffsC[phase]
 		coeffsD := polyCoeffsD[phase]
 		hist := history[div : div+tapsPerPhase]
 
-		var sum F
-		for tap := range tapsPerPhase {
-			// Horner's method for cubic polynomial: a + x*(b + x*(c + x*d))
-			a := coeffsA[tap]
-			b := coeffsB[tap]
-			c := coeffsC[tap]
-			d := coeffsD[tap]
-			interpolatedCoef := a + x*(b+x*(c+x*d))
-			sum += interpolatedCoef * hist[tap]
-		}
+		sum := s.ops.CubicInterpDot(hist, coeffsA, coeffsB, coeffsC, coeffsD, x)
 
 		s.outputBuf[outIdx] = sum
 		outIdx++

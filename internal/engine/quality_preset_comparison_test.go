@@ -387,7 +387,7 @@ func TestQualityPresets_ComprehensiveSummary(t *testing.T) {
 		snrMatch  bool
 	}
 
-	var summary []summaryRow
+	summary := make([]summaryRow, 0, len(qualityPresets))
 
 	for _, preset := range qualityPresets {
 		row := summaryRow{preset: preset.name}

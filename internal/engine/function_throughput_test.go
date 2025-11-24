@@ -36,7 +36,9 @@ func BenchmarkFunc_ConvolveValid_Taps256(b *testing.B) {
 	benchConvolveValid(b, 256, 4096)
 }
 
+//nolint:unparam // signalLen kept as parameter for future test flexibility
 func benchConvolveValid(b *testing.B, taps, signalLen int) {
+	b.Helper()
 	ops := simdops.Float64Ops()
 
 	// Create test data
@@ -73,6 +75,7 @@ func BenchmarkFunc_ConvolveValidMulti_4Phase_Taps64(b *testing.B) {
 }
 
 func benchConvolveValidMulti(b *testing.B, phases, taps, signalLen int) {
+	b.Helper()
 	ops := simdops.Float64Ops()
 
 	// Create test data
@@ -120,6 +123,7 @@ func BenchmarkFunc_DotProduct_128(b *testing.B) {
 }
 
 func benchDotProduct(b *testing.B, size int) {
+	b.Helper()
 	ops := simdops.Float64Ops()
 
 	a := make([]float64, size)
@@ -150,6 +154,7 @@ func BenchmarkFunc_Interleave2_8192(b *testing.B) {
 }
 
 func benchInterleave2(b *testing.B, size int) {
+	b.Helper()
 	ops := simdops.Float64Ops()
 
 	a := make([]float64, size)
@@ -189,6 +194,7 @@ func BenchmarkFunc_DFTStage_VeryHigh(b *testing.B) {
 }
 
 func benchDFTStage(b *testing.B, quality Quality) {
+	b.Helper()
 	stage, err := NewDFTStage[float64](2, quality)
 	if err != nil {
 		b.Fatal(err)
@@ -236,6 +242,7 @@ func BenchmarkFunc_PolyphaseStage_VeryHigh_Up(b *testing.B) {
 }
 
 func benchPolyphaseStage(b *testing.B, quality Quality, ratio float64, isDownsampling bool) {
+	b.Helper()
 	var totalIORatio float64
 	if isDownsampling {
 		totalIORatio = 1.0 / ratio // input/output for downsampling
@@ -294,6 +301,7 @@ func BenchmarkFunc_CubicInterpolation_100Taps(b *testing.B) {
 }
 
 func benchCubicInterpolation(b *testing.B, tapsPerPhase int) {
+	b.Helper()
 	// Simulate the polyphase inner loop with cubic coefficient interpolation
 	coeffsA := make([]float64, tapsPerPhase)
 	coeffsB := make([]float64, tapsPerPhase)
@@ -417,6 +425,7 @@ func BenchmarkFunc_FullPipeline_44kTo48k_VeryHigh(b *testing.B) {
 }
 
 func benchFullPipeline(b *testing.B, inputRate, outputRate float64, quality Quality) {
+	b.Helper()
 	resampler, err := NewResampler[float64](inputRate, outputRate, quality)
 	if err != nil {
 		b.Fatal(err)

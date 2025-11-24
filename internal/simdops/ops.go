@@ -39,6 +39,11 @@ type Ops[F Float] struct {
 
 	// Scale multiplies each element by scalar s: dst[i] = a[i] * s
 	Scale func(dst, a []F, s F)
+
+	// CubicInterpDot computes the fused cubic interpolation dot product:
+	//   Σ hist[i] * (a[i] + x*(b[i] + x*(c[i] + x*d[i])))
+	// Used for polyphase resampling with cubic coefficient interpolation.
+	CubicInterpDot func(hist, a, b, c, d []F, x F) F
 }
 
 // Pre-instantiated operations for each float type.
@@ -51,6 +56,7 @@ var (
 		Interleave2:        f32.Interleave2,
 		Sum:                f32.Sum,
 		Scale:              f32.Scale,
+		CubicInterpDot:     f32.CubicInterpDot,
 	}
 	ops64 = Ops[float64]{
 		DotProductUnsafe:   f64.DotProductUnsafe,
@@ -59,6 +65,7 @@ var (
 		Interleave2:        f64.Interleave2,
 		Sum:                f64.Sum,
 		Scale:              f64.Scale,
+		CubicInterpDot:     f64.CubicInterpDot,
 	}
 )
 
