@@ -1298,7 +1298,8 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, ha
 	//   1. Downsampling (!upsample), AND
 	//   2. There IS a pre-stage (preM != 0)
 	//
-	// For downsampling WITHOUT pre-stage (preM == 0), use the else branch (Fn=1).
+	// For downsampling WITHOUT pre-stage, we need ANTI-ALIASING filter parameters
+	// that cut off at the OUTPUT Nyquist frequency, not use the upsampling formula.
 	if !params.IsUpsampling && hasPreStage {
 		// Downsampling WITH pre-stage: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
 		params.Fn = soxrDownsamplingFnFactor * params.Mult
@@ -1306,7 +1307,7 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, ha
 		params.FsRaw = soxrDownsamplingFsBase + math.Abs(params.Fs1-1.0)
 		params.FpRaw = params.Fp1
 	} else {
-		// Upsampling OR downsampling without pre-stage: Fn = 1, use image rejection formula
+		// Upsampling: anti-imaging formula
 		params.Fn = 1.0
 		// Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7) for mode > 0
 		params.FsRaw = imageRejectionFactor - (params.Fp1 + (params.Fs1-params.Fp1)*soxrUpsamplingFsCoeff)

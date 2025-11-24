@@ -706,7 +706,7 @@ func TestAntiAliasing_Downsampling(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := measureDownsamplingAntiAliasing(tc.inputRate, tc.outputRate, QualityHigh)
+			result, err := measureDownsamplingAntiAliasing(tc.inputRate, tc.outputRate, QualityVeryHigh)
 			if err != nil {
 				t.Fatalf("measureDownsamplingAntiAliasing failed: %v", err)
 			}
@@ -746,8 +746,8 @@ func TestAntiAliasing_Downsampling_CompareWithSoxr(t *testing.T) {
 				t.Skipf("soxr reference not available: %v", err)
 			}
 
-			// Test our resampler
-			goResult, err := measureDownsamplingAntiAliasing(tc.inputRate, tc.outputRate, QualityHigh)
+			// Test our resampler with VeryHigh quality to match soxr's SOXR_VHQ
+			goResult, err := measureDownsamplingAntiAliasing(tc.inputRate, tc.outputRate, QualityVeryHigh)
 			if err != nil {
 				t.Fatalf("measureDownsamplingAntiAliasing failed: %v", err)
 			}
