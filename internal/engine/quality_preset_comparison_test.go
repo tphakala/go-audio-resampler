@@ -111,6 +111,7 @@ func TestTHD_AllQualityPresets(t *testing.T) {
 		{44100, 48000, 1000, "44.1kHz_to_48kHz"},
 		{48000, 44100, 1000, "48kHz_to_44.1kHz"},
 		{48000, 96000, 1000, "48kHz_to_96kHz"},
+		{48000, 32000, 1000, "48kHz_to_32kHz_BirdNET"},
 	}
 
 	for _, preset := range qualityPresets {
@@ -169,6 +170,7 @@ func TestSNR_AllQualityPresets(t *testing.T) {
 		{44100, 48000, "44.1kHz_to_48kHz"},
 		{48000, 44100, "48kHz_to_44.1kHz"},
 		{48000, 96000, "48kHz_to_96kHz"},
+		{48000, 32000, "48kHz_to_32kHz_BirdNET"},
 	}
 
 	testFreq := 1000.0
