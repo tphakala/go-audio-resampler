@@ -5,6 +5,7 @@
 package mathutil
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -252,24 +253,7 @@ func TestBesselI0_KnownValues(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		name := "x=" + func() string {
-			switch tc.x {
-			case 0.0:
-				return "0"
-			case 1.0:
-				return "1"
-			case 2.0:
-				return "2"
-			case 5.0:
-				return "5"
-			case 10.0:
-				return "10"
-			case 15.0:
-				return "15"
-			default:
-				return "17.4"
-			}
-		}()
+		name := fmt.Sprintf("x=%v", tc.x)
 		t.Run(name, func(t *testing.T) {
 			got := BesselI0(tc.x)
 			tol := tc.expected * tc.relTol

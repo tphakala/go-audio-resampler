@@ -147,15 +147,14 @@ func TestQualityPreset_FilterLength(t *testing.T) {
 
 // DecimationTestCase holds parameters for decimation testing
 type DecimationTestCase struct {
-	InputRate     float64
-	OutputRate    float64
-	Quality       QualityPreset
-	Fn            float64 // Normalization factor = max(preL, preM)
-	FpNorm        float64 // Normalized passband end
-	FsNorm        float64 // Normalized stopband begin
-	TrBwNorm      float64 // Normalized transition bandwidth
-	ExpectedTaps  int     // Expected filter length (approximate)
-	MinAttenuation float64 // Minimum acceptable attenuation
+	InputRate    float64
+	OutputRate   float64
+	Quality      QualityPreset
+	Fn           float64 // Normalization factor = max(preL, preM)
+	FpNorm       float64 // Normalized passband end
+	FsNorm       float64 // Normalized stopband begin
+	TrBwNorm     float64 // Normalized transition bandwidth
+	ExpectedTaps int     // Expected filter length (approximate)
 }
 
 // TestDecimation96to48_AllPresets tests 96->48 decimation with all quality presets.
@@ -302,13 +301,12 @@ func TestSoxrTapCountRanges(t *testing.T) {
 	t.Log("Expected soxr tap count ranges (verify with soxr analysis):")
 	for _, tc := range expectedSoxrTapCounts {
 		t.Logf("  %s: %d-%d taps", tc.name, tc.expectedMin, tc.expectedMax)
+		// Validate range is sensible
+		assert.Less(t, tc.expectedMin, tc.expectedMax,
+			"%s: expectedMin should be less than expectedMax", tc.name)
+		assert.Greater(t, tc.expectedMin, 0,
+			"%s: expectedMin should be positive", tc.name)
 	}
-}
-
-// Helper function to calculate attenuation from bits
-func attenuationFromBits(bits int) float64 {
-	const dbPerBit = 6.0206
-	return float64(bits+1) * dbPerBit
 }
 
 // Benchmark filter length calculation for all presets

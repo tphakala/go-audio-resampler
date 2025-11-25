@@ -140,7 +140,6 @@ func TestFilterFrequencyResponse_Passband(t *testing.T) {
 	const (
 		cutoffFreq   = 0.478
 		transitionBW = 0.02175
-		attenuation  = 174.0
 	)
 
 	// Use smaller filter for testing (full VHQ would be 8000+ taps)

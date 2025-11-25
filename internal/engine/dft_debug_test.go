@@ -295,15 +295,24 @@ func TestFullResampler_96to48_Attenuation(t *testing.T) {
 
 	// Also test passband
 	t.Logf("\nPassband test at 10 kHz:")
-	resampler, _ = NewResampler[float64](inputRate, outputRate, QualityVeryHigh)
+	resampler, err = NewResampler[float64](inputRate, outputRate, QualityVeryHigh)
+	if err != nil {
+		t.Fatalf("Failed to create resampler for passband test: %v", err)
+	}
 	passbandFreq := 10000.0
 	for i := range input {
 		ti := float64(i) / inputRate
 		input[i] = math.Sin(2 * math.Pi * passbandFreq * ti)
 	}
 
-	output, _ = resampler.Process(input)
-	flush, _ = resampler.Flush()
+	output, err = resampler.Process(input)
+	if err != nil {
+		t.Fatalf("Process failed for passband test: %v", err)
+	}
+	flush, err = resampler.Flush()
+	if err != nil {
+		t.Fatalf("Flush failed for passband test: %v", err)
+	}
 	output = append(output, flush...)
 
 	steadyOutput = output[skip : len(output)-skip]
