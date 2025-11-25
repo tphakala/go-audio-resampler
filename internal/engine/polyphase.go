@@ -964,9 +964,11 @@ func (s *DFTDecimationStage[F]) Process(input []F) ([]F, error) {
 	}
 
 	// Update decimation phase for next call
-	// After processing numFilterable input positions, phase advances
-	newPhase := (s.decimPhase + numFilterable) % s.factor
-	s.decimPhase = (s.factor - newPhase) % s.factor
+	// The phase represents the offset into the decimation cycle. After consuming
+	// numFilterable samples, the buffer shifts and the new phase becomes
+	// (oldPhase - consumed) mod factor. We use (x%f+f)%f to handle Go's
+	// negative modulo behavior (Go returns negative for negative dividend).
+	s.decimPhase = ((s.decimPhase - numFilterable) % s.factor + s.factor) % s.factor
 
 	// Shift history - keep only what we need for next call
 	consumed := numFilterable
@@ -1605,14 +1607,10 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, ha
 	//   1. Downsampling (!upsample), AND
 	//   2. There IS a pre-stage (preM != 0)
 	//
-	// For downsampling WITHOUT pre-stage, we need ANTI-ALIASING filter parameters
-	// that cut off at the OUTPUT Nyquist frequency.
-	//
-	// BUG FIX: The original soxr code falls into the upsampling formula for
-	// downsampling without pre-stage. This works for soxr because it typically
-	// uses DFT stages for downsampling. However, our Go implementation uses
-	// polyphase directly for all downsampling, so we need to handle this case
-	// explicitly by using Fn=mult to properly scale the filter cutoff.
+	// For downsampling WITHOUT pre-stage (hasPreStage=false), soxr intentionally
+	// uses the same formula as upsampling (Fn=1). This case occurs when there's
+	// a 2x upsampling pre-stage (preM=0 in soxr terms), so the polyphase stage
+	// sees Fn=1 normalization and uses the anti-imaging formula.
 	if !params.IsUpsampling && hasPreStage {
 		// Downsampling WITH pre-stage: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
 		params.Fn = soxrDownsamplingFnFactor * params.Mult
