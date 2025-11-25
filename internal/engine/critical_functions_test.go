@@ -275,11 +275,12 @@ func TestComputePolyphaseFilterParams_FnNormalization(t *testing.T) {
 			assert.InDelta(t, tc.expectFn, params.Fn, tc.expectFn*0.01,
 				"Fn should be approximately %.3f", tc.expectFn)
 
-			// For downsampling WITH pre-stage, verify Fs formula: Fs = 3 + |0.5 - 1| = 3.5
+			// For downsampling WITH pre-stage, verify Fs formula: Fs = 3 + |Fs1 - 1|
+			// where Fs1 = ratio (for downsampling)
 			if !tc.isUpsampling && tc.hasPreStage {
-				expectedFsRaw := 3.0 + math.Abs(0.5-1.0) // = 3.5
+				expectedFsRaw := 3.0 + math.Abs(tc.ratio-1.0)
 				assert.InDelta(t, expectedFsRaw, params.FsRaw, 0.01,
-					"FsRaw for downsampling with pre-stage should be 3.5")
+					"FsRaw for downsampling with pre-stage should be 3 + |ratio - 1| = %.4f", expectedFsRaw)
 			}
 
 			// Verify Fp and Fs are normalized by Fn
@@ -327,8 +328,11 @@ func TestComputePolyphaseFilterParams_DownsamplingVsUpsampling(t *testing.T) {
 	// Downsampling WITH pre-stage should have Fn = 2 * mult ≈ 2.176
 	assert.Greater(t, downWithPreParams.Fn, 1.5, "Downsampling with pre-stage Fn should be > 1.5")
 
-	// Downsampling WITH pre-stage FsRaw should be 3.5 (from formula 3 + |0.5 - 1|)
-	assert.InDelta(t, 3.5, downWithPreParams.FsRaw, 0.01, "Downsampling with pre-stage FsRaw should be 3.5")
+	// Downsampling WITH pre-stage FsRaw should be 3 + |ratio - 1|
+	// For 48→44.1: ratio = 44100/48000 = 0.91875, so FsRaw = 3.08125
+	expectedFsRaw := 3.0 + math.Abs(44100.0/48000.0-1.0)
+	assert.InDelta(t, expectedFsRaw, downWithPreParams.FsRaw, 0.01,
+		"Downsampling with pre-stage FsRaw should be 3 + |ratio - 1| = %.4f", expectedFsRaw)
 
 	// Downsampling WITHOUT pre-stage should use the image rejection formula for FsRaw
 	// FsRaw = 2 - (Fp1 + (Fs1 - Fp1) * 0.7)
