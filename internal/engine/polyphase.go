@@ -144,9 +144,10 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 			polyphaseRatio := outputRate / intermediateRate
 			// totalIORatio is input/output ratio relative to ORIGINAL rates
 			totalIORatio := ioRatio
-			// hasPreStage = true because we have a DFT pre-stage (upsampling)
-			// Note: soxr uses preM=0 (upsampling pre-stage), so the polyphase
-			// sees upsample=false, preM=0 and uses the appropriate formulas.
+			// hasPreStage = false because soxr uses preM=0 for upsampling pre-stages.
+			// When the pre-stage is upsampling (not downsampling), the polyphase
+			// filter design treats it as if there's no pre-stage in terms of
+			// frequency normalization (Fn=1, not Fn=2*mult).
 			polyStage, err := NewPolyphaseStage[F](polyphaseRatio, totalIORatio, false, quality)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create polyphase stage: %w", err)
@@ -853,10 +854,10 @@ func NewDFTDecimationStage[F simdops.Float](factor int, quality Quality) (*DFTDe
 	//   cutoff = Fs_norm * 0.5 = 0.5 / factor = 0.25 for factor=2
 	//   This means cutoff at 25% of INPUT sample rate = 50% of OUTPUT Nyquist
 
-	// soxr uses these parameters for VHQ:
+	// Get quality-specific passband end and stopband start
 	// soxrFp: Passband end (relative to input Nyquist = 1.0)
 	// soxrFs: Stopband start (at input Nyquist = output Nyquist after decimation)
-	soxrFp := passbandVeryHigh
+	soxrFp := qualityToPassbandEnd(quality)
 	soxrFs := 1.0
 
 	// Normalize by Fn (decimation factor)
