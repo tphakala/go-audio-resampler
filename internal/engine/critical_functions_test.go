@@ -308,8 +308,8 @@ func TestComputePolyphaseFilterParams_FnNormalization(t *testing.T) {
 // TestComputePolyphaseFilterParams_DownsamplingVsUpsampling verifies that
 // the hasPreStage parameter correctly changes the filter design parameters.
 func TestComputePolyphaseFilterParams_DownsamplingVsUpsampling(t *testing.T) {
-	const attenuation = 126.0  // QualityHigh
-	const passbandEnd = 0.912  // QualityHigh passband end
+	const attenuation = 126.0 // QualityHigh
+	const passbandEnd = 0.912 // QualityHigh passband end
 
 	// Compare upsampling with pre-stage (our Go architecture)
 	// vs downsampling without pre-stage (our Go architecture)

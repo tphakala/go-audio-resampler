@@ -46,7 +46,7 @@ func TestDFTDecimationStage_FilterAnalysis(t *testing.T) {
 		FpNorm, FsNorm, trBW, Fc, cutoff)
 
 	// Find key metrics
-	passbandEnd := cutoff - 0.005 // A bit before cutoff
+	passbandEnd := cutoff - 0.005  // A bit before cutoff
 	stopbandStart := cutoff + 0.02 // After transition band
 
 	maxPassband := 0.0
@@ -56,7 +56,7 @@ func TestDFTDecimationStage_FilterAnalysis(t *testing.T) {
 
 	for i, f := range resp.Frequencies {
 		mag := resp.Magnitude[i]
-		magDB := 20 * math.Log10(mag + 1e-15)
+		magDB := 20 * math.Log10(mag+1e-15)
 
 		if f <= passbandEnd {
 			if mag > maxPassband {
@@ -73,7 +73,7 @@ func TestDFTDecimationStage_FilterAnalysis(t *testing.T) {
 		}
 	}
 
-	rippleDB := 20 * math.Log10(maxPassband / minPassband)
+	rippleDB := 20 * math.Log10(maxPassband/minPassband)
 	effectiveAtten := -maxStopband
 
 	t.Logf("Filter response:")
@@ -90,7 +90,7 @@ func TestDFTDecimationStage_FilterAnalysis(t *testing.T) {
 		if idx >= len(resp.Frequencies) {
 			idx = len(resp.Frequencies) - 1
 		}
-		magDB := 20 * math.Log10(resp.Magnitude[idx] + 1e-15)
+		magDB := 20 * math.Log10(resp.Magnitude[idx]+1e-15)
 		freqHz := f * 96000 // At 96kHz input
 		t.Logf("  f=%.3f (%.0f Hz @ 96kHz): %.2f dB", f, freqHz, magDB)
 	}
@@ -168,8 +168,8 @@ func TestDFTDecimationStage_StopbandProcessing(t *testing.T) {
 		}
 	}
 	outputRMS = math.Sqrt(outputRMS / float64(len(steadyOutput)))
-	outputDB := 20 * math.Log10(outputRMS + 1e-15)
-	maxDB := 20 * math.Log10(maxOutput + 1e-15)
+	outputDB := 20 * math.Log10(outputRMS+1e-15)
+	maxDB := 20 * math.Log10(maxOutput+1e-15)
 
 	attenuation := inputDB - outputDB
 
@@ -208,8 +208,8 @@ func TestDFTDecimationStage_StopbandProcessing(t *testing.T) {
 		}
 	}
 	outputRMS = math.Sqrt(outputRMS / float64(len(steadyOutput)))
-	outputDB = 20 * math.Log10(outputRMS + 1e-15)
-	maxDB = 20 * math.Log10(maxOutput + 1e-15)
+	outputDB = 20 * math.Log10(outputRMS+1e-15)
+	maxDB = 20 * math.Log10(maxOutput+1e-15)
 
 	passbandGain := 20*math.Log10(outputRMS) - inputDB
 	t.Logf("  Input RMS:  %.6f (%.2f dB)", inputRMS, inputDB)
@@ -282,8 +282,8 @@ func TestFullResampler_96to48_Attenuation(t *testing.T) {
 		}
 	}
 	outputRMS = math.Sqrt(outputRMS / float64(len(steadyOutput)))
-	outputDB := 20 * math.Log10(outputRMS + 1e-15)
-	maxDB := 20 * math.Log10(maxOutput + 1e-15)
+	outputDB := 20 * math.Log10(outputRMS+1e-15)
+	maxDB := 20 * math.Log10(maxOutput+1e-15)
 
 	attenuation := inputDB - outputDB
 
@@ -321,7 +321,7 @@ func TestFullResampler_96to48_Attenuation(t *testing.T) {
 		outputRMS += v * v
 	}
 	outputRMS = math.Sqrt(outputRMS / float64(len(steadyOutput)))
-	outputDB = 20 * math.Log10(outputRMS + 1e-15)
+	outputDB = 20 * math.Log10(outputRMS+1e-15)
 
 	passbandGain := outputDB - inputDB
 	t.Logf("  Passband gain: %.2f dB (should be ~0 dB)", passbandGain)
@@ -392,8 +392,8 @@ func TestFullResampler_96to48_MultiTone(t *testing.T) {
 		}
 	}
 	outputRMS = math.Sqrt(outputRMS / float64(len(steadyOutput)))
-	outputDB := 20 * math.Log10(outputRMS + 1e-15)
-	maxDB := 20 * math.Log10(maxOutput + 1e-15)
+	outputDB := 20 * math.Log10(outputRMS+1e-15)
+	maxDB := 20 * math.Log10(maxOutput+1e-15)
 
 	attenuation := inputDB - outputDB
 
@@ -423,7 +423,7 @@ func TestFullResampler_96to48_MultiTone(t *testing.T) {
 			sumSin += v * math.Sin(phase)
 		}
 		amp := math.Sqrt(sumCos*sumCos+sumSin*sumSin) / float64(len(steadyOutput)) * 2
-		ampDB := 20 * math.Log10(amp + 1e-15)
+		ampDB := 20 * math.Log10(amp+1e-15)
 		t.Logf("  f=%.0f Hz: amplitude %.2e (%.2f dB)", testFreq, amp, ampDB)
 	}
 }
@@ -435,12 +435,12 @@ func TestPolyphaseFilterParams_48to44_Diagnostic(t *testing.T) {
 	inputRate := 48000.0
 	outputRate := 44100.0
 	intermediateRate := inputRate * 2.0 // 96 kHz after 2x pre-stage
-	attenuation := 174.58 // VeryHigh
+	attenuation := 174.58               // VeryHigh
 
 	// Polyphase ratio is from intermediate to output
 	polyphaseRatio := outputRate / intermediateRate // 44.1/96 = 0.459375
-	totalIORatio := inputRate / outputRate // ~1.088 (original input/output)
-	passbandEnd := 0.913 // VeryHigh quality passband end
+	totalIORatio := inputRate / outputRate          // ~1.088 (original input/output)
+	passbandEnd := 0.913                            // VeryHigh quality passband end
 
 	// GCD-based numPhases for polyphase stage
 	// 44100/96000 reduces to 147/320, so numPhases = 147
@@ -504,7 +504,8 @@ func TestPassbandRipple_48to44_Diagnostic(t *testing.T) {
 	inputRate := 48000.0
 	outputRate := 44100.0
 
-	resampler, err := NewResampler[float64](inputRate, outputRate, QualityVeryHigh)
+	// Verify resampler can be created
+	_, err := NewResampler[float64](inputRate, outputRate, QualityVeryHigh)
 	if err != nil {
 		t.Fatalf("Failed to create resampler: %v", err)
 	}
@@ -517,13 +518,12 @@ func TestPassbandRipple_48to44_Diagnostic(t *testing.T) {
 	t.Logf("Output Nyquist: %.0f Hz", outputRate/2)
 	t.Logf("")
 
-	maxRipple := 0.0
 	minGain := 0.0
 	maxGain := 0.0
 
 	for _, testFreq := range testFreqs {
 		// Create fresh resampler for each test
-		resampler, _ = NewResampler[float64](inputRate, outputRate, QualityVeryHigh)
+		resampler, _ := NewResampler[float64](inputRate, outputRate, QualityVeryHigh)
 
 		// Generate test sine wave
 		duration := 0.1
@@ -569,9 +569,6 @@ func TestPassbandRipple_48to44_Diagnostic(t *testing.T) {
 	}
 
 	ripple := maxGain - minGain
-	if ripple > maxRipple {
-		maxRipple = ripple
-	}
 
 	t.Logf("")
 	t.Logf("Min gain: %.2f dB, Max gain: %.2f dB", minGain, maxGain)
@@ -679,7 +676,7 @@ func TestDFTDecimationStage_CompareQualities(t *testing.T) {
 			maxStopband := -300.0
 			for i, f := range resp.Frequencies {
 				if f > 0.26 { // After transition band
-					magDB := 20 * math.Log10(resp.Magnitude[i] + 1e-15)
+					magDB := 20 * math.Log10(resp.Magnitude[i]+1e-15)
 					if magDB > maxStopband {
 						maxStopband = magDB
 					}
@@ -694,22 +691,22 @@ func TestDFTDecimationStage_CompareQualities(t *testing.T) {
 // TestLsxInvFResp_Debug shows what lsxInvFResp returns for different attenuations
 func TestLsxInvFResp_Debug(t *testing.T) {
 	drop := -0.01 // rolloff setting
-	
+
 	attenuations := []float64{50, 80, 102, 126, 160, 175}
 	for _, att := range attenuations {
 		result := lsxInvFResp(drop, att)
 		t.Logf("lsxInvFResp(%.2f, %.1f dB) = %.6f", drop, att, result)
 	}
-	
+
 	// Show what happens to FpRaw adjustment for 48→44.1
 	t.Log("\n=== FpRaw adjustment for 48→44.1 ===")
 	fpRaw := 0.4547
 	fsRaw := 1.5136
-	
+
 	for _, att := range []float64{102, 126, 175} {
 		invF := lsxInvFResp(drop, att)
 		adjustedFp := fsRaw - (fsRaw-fpRaw)/(1.0-invF)
-		t.Logf("att=%.0f dB: invFResp=%.4f, adjustedFp=%.4f (original=%.4f, reduction=%.1f%%)", 
+		t.Logf("att=%.0f dB: invFResp=%.4f, adjustedFp=%.4f (original=%.4f, reduction=%.1f%%)",
 			att, invF, adjustedFp, fpRaw, (1-adjustedFp/fpRaw)*100)
 	}
 }

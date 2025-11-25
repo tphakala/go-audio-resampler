@@ -1,7 +1,6 @@
-// Package filter provides filter design functions for audio resampling.
-//
-// This file contains tests that validate filter properties against soxr reference behavior.
 package filter
+
+// This file contains tests that validate filter properties against soxr reference behavior.
 
 import (
 	"math"
@@ -171,11 +170,11 @@ func TestFilterFrequencyResponse_Passband(t *testing.T) {
 // TestFilterFrequencyResponse_Stopband validates stopband attenuation.
 func TestFilterFrequencyResponse_Stopband(t *testing.T) {
 	testCases := []struct {
-		name              string
-		cutoffFreq        float64
-		transitionBW      float64
-		attenuation       float64
-		expectedMinAtten  float64 // Allow some margin
+		name             string
+		cutoffFreq       float64
+		transitionBW     float64
+		attenuation      float64
+		expectedMinAtten float64 // Allow some margin
 	}{
 		{"80dB_filter", 0.4, 0.05, 80.0, 70.0},
 		{"100dB_filter", 0.4, 0.05, 100.0, 90.0},
@@ -326,7 +325,7 @@ func TestDecimation_DCPreservation(t *testing.T) {
 	filterCenter := filterLen / 2
 
 	// Apply filter and decimate
-	for i := 0; i < outputLen; i++ {
+	for i := range outputLen {
 		inputIdx := i * decimFactor
 		sum := 0.0
 
@@ -379,7 +378,7 @@ func TestDecimation_ImpulseResponse(t *testing.T) {
 	filterCenter := filterLen / 2
 
 	// Apply filter and decimate
-	for i := 0; i < outputLen; i++ {
+	for i := range outputLen {
 		inputIdx := i * decimFactor
 		sum := 0.0
 
@@ -441,7 +440,7 @@ func TestDecimation_InBandSine(t *testing.T) {
 	filterCenter := filterLen / 2
 
 	// Apply filter and decimate
-	for i := 0; i < outputLen; i++ {
+	for i := range outputLen {
 		inputIdx := i * decimFactor
 		sum := 0.0
 
@@ -513,7 +512,7 @@ func TestDecimation_StopbandSine(t *testing.T) {
 	filterCenter := filterLen / 2
 
 	// Apply filter and decimate
-	for i := 0; i < outputLen; i++ {
+	for i := range outputLen {
 		inputIdx := i * decimFactor
 		sum := 0.0
 

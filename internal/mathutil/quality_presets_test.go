@@ -1,7 +1,6 @@
-// Package mathutil provides mathematical functions for audio resampling.
-//
-// This file contains tests for quality preset parameters against soxr reference values.
 package mathutil
+
+// This file contains tests for quality preset parameters against soxr reference values.
 
 import (
 	"testing"
@@ -88,7 +87,7 @@ func TestQualityPreset_Attenuation(t *testing.T) {
 		t.Run(preset.Name, func(t *testing.T) {
 			expectedAtt := float64(preset.Bits+1) * dbPerBit
 
-			assert.InDelta(t, preset.Attenuation, expectedAtt, 0.01,
+			assert.InDelta(t, expectedAtt, preset.Attenuation, 0.01,
 				"%s: attenuation should be (bits+1)*6.0206", preset.Name)
 
 			t.Logf("%s: %d bits -> %.2f dB attenuation", preset.Name, preset.Bits, expectedAtt)
@@ -240,7 +239,7 @@ func TestDownsampling48to32_AllPresets(t *testing.T) {
 		outputRate = 32000.0
 	)
 
-	ratio := outputRate / inputRate // 0.666...
+	ratio := outputRate / inputRate   // 0.666...
 	ioRatio := inputRate / outputRate // 1.5
 	t.Logf("Downsampling ratio: %.6f (io_ratio=%.2f)", ratio, ioRatio)
 
@@ -304,7 +303,7 @@ func TestSoxrTapCountRanges(t *testing.T) {
 		// Validate range is sensible
 		assert.Less(t, tc.expectedMin, tc.expectedMax,
 			"%s: expectedMin should be less than expectedMax", tc.name)
-		assert.Greater(t, tc.expectedMin, 0,
+		assert.Positive(t, tc.expectedMin,
 			"%s: expectedMin should be positive", tc.name)
 	}
 }

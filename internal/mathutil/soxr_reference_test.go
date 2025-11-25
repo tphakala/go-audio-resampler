@@ -1,8 +1,7 @@
-// Package mathutil provides mathematical functions for audio resampling.
-//
+package mathutil
+
 // This file contains unit tests that validate our filter design functions
 // against soxr reference values.
-package mathutil
 
 import (
 	"fmt"
@@ -15,11 +14,11 @@ import (
 // soxr reference values for Kaiser beta calculation (lsx_kaiser_beta)
 // Test data derived from soxr filter.c implementation
 var kaiserBetaTestCases = []struct {
-	name   string
-	att    float64 // attenuation in dB
-	trBw   float64 // transition bandwidth (normalized)
-	beta   float64 // expected beta
-	useTrBw bool   // whether to use KaiserBetaWithTrBw
+	name    string
+	att     float64 // attenuation in dB
+	trBw    float64 // transition bandwidth (normalized)
+	beta    float64 // expected beta
+	useTrBw bool    // whether to use KaiserBetaWithTrBw
 }{
 	// Low attenuation (att <= 20.96) - beta = 0
 	{"low_att_20dB", 20, 0.1, 0.0, false},
@@ -36,7 +35,7 @@ var kaiserBetaTestCases = []struct {
 
 	// High attenuation (50 < att < 60) - simple formula
 	// β = 0.1102 * (att - 8.7)
-	{"high_att_55dB", 55, 0.1, 5.103, false},  // 0.1102 * (55 - 8.7) = 5.103
+	{"high_att_55dB", 55, 0.1, 5.103, false}, // 0.1102 * (55 - 8.7) = 5.103
 
 	// Very high attenuation (att >= 60) - soxr polynomial interpolation
 	// These use KaiserBetaWithTrBw for accuracy
@@ -125,8 +124,9 @@ func TestEstimateFilterLength_SoxrReference(t *testing.T) {
 // SoxrFilterTapCount calculates the number of filter taps using soxr's confirmed formula.
 //
 // From soxr filter.c lsx_kaiser_params:
-//   att_factor = ((0.0007528358 - 1.577737e-05*beta)*beta + 0.6248022)*beta + 0.06186902
-//   num_taps = ceil(att_factor / tr_bw) + 1
+//
+//	att_factor = ((0.0007528358 - 1.577737e-05*beta)*beta + 0.6248022)*beta + 0.06186902
+//	num_taps = ceil(att_factor / tr_bw) + 1
 //
 // This gives ~541 taps for VHQ 96→48, which matches our current implementation.
 // The 7982 figure from earlier analysis may have been from polyphase decomposition.
@@ -181,20 +181,20 @@ func TestSoxrFilterTapCount_Implementation(t *testing.T) {
 // Filter parameter calculation for 96kHz→48kHz decimation
 // This validates the normalization calculation against soxr
 var filterParamTestCases = []struct {
-	name     string
-	Fp       float64 // passband end (from quality spec)
-	Fs       float64 // stopband begin
-	Fn       float64 // normalization factor = max(preL, preM)
-	FpNorm   float64 // expected Fp / Fn
-	FsNorm   float64 // expected Fs / Fn
-	trBw     float64 // expected 0.5 * (Fs_norm - Fp_norm)
-	Fc       float64 // expected Fs_norm - tr_bw
+	name   string
+	Fp     float64 // passband end (from quality spec)
+	Fs     float64 // stopband begin
+	Fn     float64 // normalization factor = max(preL, preM)
+	FpNorm float64 // expected Fp / Fn
+	FsNorm float64 // expected Fs / Fn
+	trBw   float64 // expected 0.5 * (Fs_norm - Fp_norm)
+	Fc     float64 // expected Fs_norm - tr_bw
 }{
 	{
 		name:   "vhq_96_48",
 		Fp:     0.913,
 		Fs:     1.0,
-		Fn:     2.0,  // max(preL=1, preM=2)
+		Fn:     2.0, // max(preL=1, preM=2)
 		FpNorm: 0.4565,
 		FsNorm: 0.5,
 		trBw:   0.02175,
@@ -204,7 +204,7 @@ var filterParamTestCases = []struct {
 		name:   "vhq_upsampling_44_48",
 		Fp:     0.913,
 		Fs:     1.0,
-		Fn:     1.0,  // upsampling: Fn = 1
+		Fn:     1.0, // upsampling: Fn = 1
 		FpNorm: 0.913,
 		FsNorm: 1.0,
 		trBw:   0.0435,

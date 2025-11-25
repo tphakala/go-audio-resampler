@@ -332,6 +332,13 @@ const (
 	attenuationHigh     = (bitsHigh + 1) * dbPerBit     // ~126 dB
 	attenuationVeryHigh = (bitsVeryHigh + 1) * dbPerBit // ~175 dB
 
+	// Passband end frequency constants (Fp0) as fraction of Nyquist.
+	// Values derived from soxr's quality-spec.h and lsx_to_3dB calculations.
+	passbandLow      = 0.67625 // soxr's lq_bw0 = 1385/2048 (FP exact)
+	passbandMedium   = 0.91    // soxr's MQ from lsx_to_3dB
+	passbandHigh     = 0.912   // soxr's HQ passband
+	passbandVeryHigh = 0.913   // soxr's VHQ passband
+
 	// Filter cutoff frequency constants.
 	nyquistFraction    = 0.5  // Half the sample rate (Nyquist)
 	transitionBWFactor = 0.05 // Transition bandwidth relative to Nyquist
@@ -432,22 +439,17 @@ func qualityToAttenuation(q Quality) float64 {
 func qualityToPassbandEnd(q Quality) float64 {
 	switch q {
 	case QualityQuick, QualityLow:
-		// soxr's lq_bw0 = 1385/2048 ≈ 0.67625 (FP exact)
-		return 0.67625
+		return passbandLow
 	case QualityMedium:
-		// soxr's MQ uses Fp = 0.91 (from lsx_to_3dB calculation)
-		return 0.91
+		return passbandMedium
 	case QualityHigh, Quality20Bit:
-		// soxr's HQ uses Fp = 0.912
-		return 0.912
+		return passbandHigh
 	case QualityVeryHigh, Quality24Bit, Quality28Bit, Quality32Bit:
-		// soxr's VHQ uses Fp = 0.913
-		return 0.913
+		return passbandVeryHigh
 	case Quality16Bit:
-		// 16-bit uses same as Low quality
-		return 0.67625
+		return passbandLow
 	default:
-		return 0.912 // Default to HQ
+		return passbandHigh
 	}
 }
 
@@ -794,7 +796,7 @@ type DFTDecimationStage[F simdops.Float] struct {
 	factor int // Decimation factor (e.g., 2 for 96→48)
 
 	// FIR filter coefficients (stored in reversed order for convolution)
-	coeffs []F
+	coeffs  []F
 	numTaps int
 
 	// Input history buffer
@@ -852,29 +854,29 @@ func NewDFTDecimationStage[F simdops.Float](factor int, quality Quality) (*DFTDe
 	//   This means cutoff at 25% of INPUT sample rate = 50% of OUTPUT Nyquist
 
 	// soxr uses these parameters for VHQ:
-	const (
-		soxrFp = 0.913 // Passband end (relative to input Nyquist = 1.0)
-		soxrFs = 1.0   // Stopband start (at input Nyquist = output Nyquist after decimation)
-	)
+	// soxrFp: Passband end (relative to input Nyquist = 1.0)
+	// soxrFs: Stopband start (at input Nyquist = output Nyquist after decimation)
+	soxrFp := passbandVeryHigh
+	soxrFs := 1.0
 
 	// Normalize by Fn (decimation factor)
 	FpNorm := soxrFp / float64(factor)
 	FsNorm := soxrFs / float64(factor)
 
 	// Transition bandwidth
-	trBW := 0.5 * (FsNorm - FpNorm)
+	trBW := transitionBandwidthHalf * (FsNorm - FpNorm)
 
 	// Cutoff frequency (in our normalization where 0.5 = Nyquist)
 	// soxr: Fc = Fs_norm - tr_bw
 	Fc := FsNorm - trBW
 
 	// Convert to our filter design convention (0.5 = Nyquist)
-	cutoff := Fc * 0.5 // Scale to 0-0.5 range
+	cutoff := Fc * nyquistFraction // Scale to 0-0.5 range
 
 	attenuation := qualityToAttenuation(quality)
 
 	// Use auto filter design with transition bandwidth scaled to our convention
-	transitionBW := trBW * 0.5 // Scale to 0-0.5 range
+	transitionBW := trBW * nyquistFraction // Scale to 0-0.5 range
 	coeffs, err := filter.DesignLowPassFilterAuto(cutoff, transitionBW, attenuation, 1.0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to design decimation filter: %w", err)
@@ -888,12 +890,12 @@ func NewDFTDecimationStage[F simdops.Float](factor int, quality Quality) (*DFTDe
 	}
 
 	return &DFTDecimationStage[F]{
-		factor:    factor,
-		coeffs:    reversedCoeffs,
-		numTaps:   numTaps,
-		history:   make([]F, 0, numTaps*historyBufferMultiplier),
+		factor:     factor,
+		coeffs:     reversedCoeffs,
+		numTaps:    numTaps,
+		history:    make([]F, 0, numTaps*historyBufferMultiplier),
 		decimPhase: 0,
-		ops:       ops,
+		ops:        ops,
 	}, nil
 }
 
@@ -902,8 +904,9 @@ func NewDFTDecimationStage[F simdops.Float](factor int, quality Quality) (*DFTDe
 // The algorithm:
 // 1. Append input to history buffer
 // 2. For each position where we have enough samples:
-//    - Compute filtered output using FIR convolution
-//    - If this position aligns with decimation phase, output the sample
+//   - Compute filtered output using FIR convolution
+//   - If this position aligns with decimation phase, output the sample
+//
 // 3. Advance decimation phase
 func (s *DFTDecimationStage[F]) Process(input []F) ([]F, error) {
 	if s.factor == 1 {
@@ -1615,20 +1618,14 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, ha
 		// Fs = 3 + |0.5 - 1| = 3.5
 		params.FsRaw = soxrDownsamplingFsBase + math.Abs(params.Fs1-1.0)
 		params.FpRaw = params.Fp1
-	} else if !params.IsUpsampling && !hasPreStage {
-		// Downsampling WITHOUT pre-stage:
-		// soxr uses the same formula as upsampling (Fn=1, same Fs calculation).
-		// This case occurs when we have a 2x upsampling pre-stage (preM=0 in soxr terms),
-		// which is our standard architecture for non-integer downsampling.
+	} else {
+		// Upsampling OR Downsampling WITHOUT pre-stage:
+		// Both cases use the anti-imaging formula with Fn=1.
+		// For downsampling without pre-stage, soxr uses the same formula as upsampling
+		// (this occurs when we have a 2x upsampling pre-stage, preM=0 in soxr terms).
 		//
 		// soxr code: else Fn = 1, Fs = 2 - (mode? Fp1 + (Fs1 - Fp1) * .7 : Fs1);
-		params.Fn = 1.0 // Same as upsampling per soxr's logic
-		params.FsRaw = imageRejectionFactor - (params.Fp1 + (params.Fs1-params.Fp1)*soxrUpsamplingFsCoeff)
-		params.FpRaw = params.Fp1
-	} else {
-		// Upsampling: anti-imaging formula
 		params.Fn = 1.0
-		// Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7) for mode > 0
 		params.FsRaw = imageRejectionFactor - (params.Fp1 + (params.Fs1-params.Fp1)*soxrUpsamplingFsCoeff)
 		params.FpRaw = params.Fp1
 	}
