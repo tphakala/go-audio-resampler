@@ -133,7 +133,8 @@ func TestQualityLevels_ProduceDifferentFilters(t *testing.T) {
 		// Get the filter parameters that would be used
 		numPhases, _ := ExportedFindRationalApprox(ratio)
 		attenuation := ExportedQualityToAttenuation(q)
-		params := ComputePolyphaseFilterParams(numPhases, ratio, totalIORatio, true, attenuation)
+		passbandEnd := ExportedQualityToPassbandEnd(q)
+		params := ComputePolyphaseFilterParams(numPhases, ratio, totalIORatio, true, attenuation, passbandEnd)
 		filterParams[q] = params
 	}
 
@@ -307,7 +308,8 @@ func TestPassbandEnd_MatchesSoxrFormula(t *testing.T) {
 
 	for _, quality := range qualities {
 		attenuation := ExportedQualityToAttenuation(quality)
-		params := ComputePolyphaseFilterParams(numPhases, ratio, totalIORatio, true, attenuation)
+		passbandEnd := ExportedQualityToPassbandEnd(quality)
+		params := ComputePolyphaseFilterParams(numPhases, ratio, totalIORatio, true, attenuation, passbandEnd)
 		passbands[quality] = params.Fp1
 
 		// Log the computed passband

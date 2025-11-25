@@ -46,6 +46,11 @@ func ExportedQualityToAttenuation(q Quality) float64 {
 	return qualityToAttenuation(q)
 }
 
+// ExportedQualityToPassbandEnd wraps qualityToPassbandEnd for testing
+func ExportedQualityToPassbandEnd(q Quality) float64 {
+	return qualityToPassbandEnd(q)
+}
+
 // GetPolyphaseStageInternals returns internal state for testing
 func (s *PolyphaseStage[F]) GetPolyphaseStageInternals() (numPhases, tapsPerPhase int, step int64, polyCoeffs [][]F) {
 	return s.numPhases, s.tapsPerPhase, s.step, s.polyCoeffs
