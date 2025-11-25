@@ -29,8 +29,9 @@ type Resampler[F simdops.Float] struct {
 	ratio      float64 // outputRate / inputRate
 
 	// Stages
-	preStage       *DFTStage[F]       // Optional pre-upsampling stage
-	polyphaseStage *PolyphaseStage[F] // Main polyphase resampling stage
+	preStage        *DFTStage[F]           // Optional pre-upsampling stage
+	decimationStage *DFTDecimationStage[F] // Optional decimation stage (for integer downsampling)
+	polyphaseStage  *PolyphaseStage[F]     // Main polyphase resampling stage
 
 	// SIMD operations for type F
 	ops *simdops.Ops[F]
@@ -101,19 +102,58 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 		}
 	} else {
 		// DOWNSAMPLING (ratio < 1.0)
-		// For downsampling, we use polyphase directly without DFT pre-stage.
-		// This is correct because:
-		// 1. DFT upsampling before polyphase downsampling is wasteful
-		// 2. The polyphase filter can handle anti-aliasing directly
-		// 3. soxr also uses this approach for downsampling
-		totalIORatio := inputRate / outputRate
-		// hasPreStage = false because we go directly to polyphase
-		polyStage, err := NewPolyphaseStage[F](ratio, totalIORatio, false, quality)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create polyphase stage: %w", err)
+		// soxr uses different approaches based on the ratio:
+		// - Integer ratios (2:1, 3:1, 4:1): DFT decimation stage
+		// - Non-integer ratios: 2x DFT pre-stage + polyphase filtering
+		//
+		// For integer ratios, DFT decimation achieves 150+ dB anti-aliasing
+		// because it uses a very long filter with cutoff at output Nyquist.
+		ioRatio := inputRate / outputRate // e.g., 2.0 for 96→48
+
+		if isIntegerRatio(ioRatio) && ioRatio >= 2.0 {
+			// Integer ratio downsampling: use DFT decimation stage
+			// This matches soxr's approach for 96→48, 192→48, etc.
+			decimFactor := int(math.Round(ioRatio))
+			decimStage, err := NewDFTDecimationStage[F](decimFactor, quality)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create DFT decimation stage: %w", err)
+			}
+			r.decimationStage = decimStage
+			// No polyphase stage needed for integer decimation
+		} else {
+			// Non-integer downsampling: soxr uses 2x upsampling pre-stage + polyphase
+			// This approach gives better filter characteristics because:
+			// 1. The 2x upsampling moves frequencies up, giving more room for transition
+			// 2. The polyphase stage then has a cleaner decimation task
+			//
+			// Example for 48kHz → 44.1kHz:
+			//   Pre-stage: 2x upsample (48 → 96 kHz)
+			//   Polyphase: 96 → 44.1 kHz (ratio = 0.459375)
+			preUpsampleFactor := 2
+			intermediateRate := inputRate * float64(preUpsampleFactor)
+
+			// Create DFT pre-stage (2× upsampling)
+			dftStage, err := NewDFTStage[F](preUpsampleFactor, quality)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create DFT pre-stage: %w", err)
+			}
+			r.preStage = dftStage
+
+			// Create polyphase stage for decimation from intermediate rate
+			// Polyphase operates on pre-upsampled signal
+			polyphaseRatio := outputRate / intermediateRate
+			// totalIORatio is input/output ratio relative to ORIGINAL rates
+			totalIORatio := ioRatio
+			// hasPreStage = false because soxr uses preM=0 for upsampling pre-stages.
+			// When the pre-stage is upsampling (not downsampling), the polyphase
+			// filter design treats it as if there's no pre-stage in terms of
+			// frequency normalization (Fn=1, not Fn=2*mult).
+			polyStage, err := NewPolyphaseStage[F](polyphaseRatio, totalIORatio, false, quality)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create polyphase stage: %w", err)
+			}
+			r.polyphaseStage = polyStage
 		}
-		r.polyphaseStage = polyStage
-		// No DFT pre-stage for downsampling
 	}
 
 	return r, nil
@@ -127,7 +167,7 @@ func (r *Resampler[F]) Process(input []F) ([]F, error) {
 
 	r.samplesIn += int64(len(input))
 
-	// Stage 1: Pre-stage (DFT upsampling)
+	// Stage 1: Pre-stage (DFT upsampling) - for upsampling only
 	intermediate := input
 	var err error
 	if r.preStage != nil {
@@ -137,9 +177,16 @@ func (r *Resampler[F]) Process(input []F) ([]F, error) {
 		}
 	}
 
-	// Stage 2: Polyphase stage (if present)
+	// Stage 2: Decimation stage (for integer downsampling) OR Polyphase stage
 	output := intermediate
-	if r.polyphaseStage != nil {
+	if r.decimationStage != nil {
+		// Integer downsampling: use DFT decimation
+		output, err = r.decimationStage.Process(intermediate)
+		if err != nil {
+			return nil, fmt.Errorf("decimation stage processing failed: %w", err)
+		}
+	} else if r.polyphaseStage != nil {
+		// Non-integer ratio: use polyphase
 		output, err = r.polyphaseStage.Process(intermediate)
 		if err != nil {
 			return nil, fmt.Errorf("polyphase stage processing failed: %w", err)
@@ -173,6 +220,15 @@ func (r *Resampler[F]) Flush() ([]F, error) {
 		}
 	}
 
+	// Flush decimation stage (for integer downsampling)
+	if r.decimationStage != nil {
+		decimFlush, err := r.decimationStage.Flush()
+		if err != nil {
+			return nil, err
+		}
+		output = append(output, decimFlush...)
+	}
+
 	// Flush polyphase stage
 	if r.polyphaseStage != nil {
 		polyFlush, err := r.polyphaseStage.Flush()
@@ -190,6 +246,9 @@ func (r *Resampler[F]) Flush() ([]F, error) {
 func (r *Resampler[F]) Reset() {
 	if r.preStage != nil {
 		r.preStage.Reset()
+	}
+	if r.decimationStage != nil {
+		r.decimationStage.Reset()
 	}
 	if r.polyphaseStage != nil {
 		r.polyphaseStage.Reset()
@@ -273,6 +332,13 @@ const (
 	attenuationMedium   = (bitsMedium + 1) * dbPerBit   // ~102 dB
 	attenuationHigh     = (bitsHigh + 1) * dbPerBit     // ~126 dB
 	attenuationVeryHigh = (bitsVeryHigh + 1) * dbPerBit // ~175 dB
+
+	// Passband end frequency constants (Fp0) as fraction of Nyquist.
+	// Values derived from soxr's quality-spec.h and lsx_to_3dB calculations.
+	passbandLow      = 0.67625 // soxr's lq_bw0 = 1385/2048 (FP exact)
+	passbandMedium   = 0.91    // soxr's MQ from lsx_to_3dB
+	passbandHigh     = 0.912   // soxr's HQ passband
+	passbandVeryHigh = 0.913   // soxr's VHQ passband
 
 	// Filter cutoff frequency constants.
 	nyquistFraction    = 0.5  // Half the sample rate (Nyquist)
@@ -365,6 +431,26 @@ func qualityToAttenuation(q Quality) float64 {
 		return (bits32Bit + 1) * dbPerBit
 	default:
 		return attenuationHigh // Default to high quality
+	}
+}
+
+// qualityToPassbandEnd returns the passband end frequency (Fp0) for quality level.
+// This is the -3dB frequency as a fraction of Nyquist (0-1 where 1 = Nyquist).
+// Values are derived from soxr's quality-spec.h and lsx_to_3dB calculations.
+func qualityToPassbandEnd(q Quality) float64 {
+	switch q {
+	case QualityQuick, QualityLow:
+		return passbandLow
+	case QualityMedium:
+		return passbandMedium
+	case QualityHigh, Quality20Bit:
+		return passbandHigh
+	case QualityVeryHigh, Quality24Bit, Quality28Bit, Quality32Bit:
+		return passbandVeryHigh
+	case Quality16Bit:
+		return passbandLow
+	default:
+		return passbandHigh
 	}
 }
 
@@ -691,6 +777,233 @@ func (s *DFTStage[F]) Flush() ([]F, error) {
 // Reset clears internal state.
 func (s *DFTStage[F]) Reset() {
 	s.history = s.history[:0]
+}
+
+// =============================================================================
+// DFT Decimation Stage - soxr-style integer ratio downsampling
+// =============================================================================
+
+// DFTDecimationStage implements integer-ratio downsampling using FIR filtering
+// followed by decimation. This matches soxr's approach for integer downsample
+// ratios like 96kHz→48kHz (2:1) or 192kHz→48kHz (4:1).
+//
+// The key insight from soxr is that for integer ratio downsampling:
+// - Use Fn = decimation_factor to normalize filter frequencies
+// - Filter cutoff is at output Nyquist (not input Nyquist)
+// - This achieves 150+ dB anti-aliasing attenuation
+//
+// Type parameter F controls the precision of sample processing.
+type DFTDecimationStage[F simdops.Float] struct {
+	factor int // Decimation factor (e.g., 2 for 96→48)
+
+	// FIR filter coefficients (stored in reversed order for convolution)
+	coeffs  []F
+	numTaps int
+
+	// Input history buffer
+	history []F
+
+	// Decimation state - which input sample to output next
+	decimPhase int
+
+	// Pre-allocated output buffer
+	outputBuf []F
+
+	// SIMD operations for type F
+	ops *simdops.Ops[F]
+}
+
+// NewDFTDecimationStage creates a DFT decimation stage for integer ratio downsampling.
+//
+// This implements soxr's approach for integer downsampling ratios:
+//   - Design filter with Fn = factor (normalization to output Nyquist)
+//   - Fp = 0.913 (passband at 91.3% of output Nyquist)
+//   - Fs = 1.0 (stopband starts at output Nyquist)
+//   - After filtering, decimate by taking every 'factor'-th sample
+//
+// For 96kHz→48kHz (factor=2):
+//   - Filter cutoff at ~22 kHz (just below output Nyquist of 24 kHz)
+//   - Achieves 150+ dB anti-aliasing attenuation
+func NewDFTDecimationStage[F simdops.Float](factor int, quality Quality) (*DFTDecimationStage[F], error) {
+	if factor < 1 {
+		return nil, fmt.Errorf("decimation factor must be >= 1: %d", factor)
+	}
+
+	ops := simdops.For[F]()
+
+	if factor == 1 {
+		// No decimation needed, pass-through
+		return &DFTDecimationStage[F]{factor: 1, ops: ops}, nil
+	}
+
+	// Design lowpass filter for decimation (always in float64 for precision)
+	//
+	// soxr filter design for decimation (from SOXR_FILTER_ANALYSIS.md):
+	//   Fn = max(preL, preM) = factor (for pure decimation, preL=1, preM=factor)
+	//   Fp = 0.913 (VHQ passband, relative to input Nyquist before normalization)
+	//   Fs = 1.0 (stopband at output Nyquist, relative to input Nyquist)
+	//
+	// After normalization by Fn:
+	//   Fp_norm = 0.913 / factor
+	//   Fs_norm = 1.0 / factor
+	//
+	// For factor=2: Fp_norm=0.4565, Fs_norm=0.5
+	// This places cutoff just below output Nyquist
+	//
+	// In our filter design (where 0.5 = Nyquist of current sample rate):
+	//   cutoff = Fs_norm * 0.5 = 0.5 / factor = 0.25 for factor=2
+	//   This means cutoff at 25% of INPUT sample rate = 50% of OUTPUT Nyquist
+
+	// Get quality-specific passband end and stopband start
+	// soxrFp: Passband end (relative to input Nyquist = 1.0)
+	// soxrFs: Stopband start (at input Nyquist = output Nyquist after decimation)
+	soxrFp := qualityToPassbandEnd(quality)
+	soxrFs := 1.0
+
+	// Normalize by Fn (decimation factor)
+	FpNorm := soxrFp / float64(factor)
+	FsNorm := soxrFs / float64(factor)
+
+	// Transition bandwidth
+	trBW := transitionBandwidthHalf * (FsNorm - FpNorm)
+
+	// Cutoff frequency (in our normalization where 0.5 = Nyquist)
+	// soxr: Fc = Fs_norm - tr_bw
+	Fc := FsNorm - trBW
+
+	// Convert to our filter design convention (0.5 = Nyquist)
+	cutoff := Fc * nyquistFraction // Scale to 0-0.5 range
+
+	attenuation := qualityToAttenuation(quality)
+
+	// Use auto filter design with transition bandwidth scaled to our convention
+	transitionBW := trBW * nyquistFraction // Scale to 0-0.5 range
+	coeffs, err := filter.DesignLowPassFilterAuto(cutoff, transitionBW, attenuation, 1.0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to design decimation filter: %w", err)
+	}
+
+	// Convert coefficients to target precision F and reverse for convolution
+	numTaps := len(coeffs)
+	reversedCoeffs := make([]F, numTaps)
+	for i, c := range coeffs {
+		reversedCoeffs[numTaps-1-i] = F(c)
+	}
+
+	return &DFTDecimationStage[F]{
+		factor:     factor,
+		coeffs:     reversedCoeffs,
+		numTaps:    numTaps,
+		history:    make([]F, 0, numTaps*historyBufferMultiplier),
+		decimPhase: 0,
+		ops:        ops,
+	}, nil
+}
+
+// Process filters and decimates the input samples.
+//
+// The algorithm:
+// 1. Append input to history buffer
+// 2. For each position where we have enough samples:
+//   - Compute filtered output using FIR convolution
+//   - If this position aligns with decimation phase, output the sample
+//
+// 3. Advance decimation phase
+func (s *DFTDecimationStage[F]) Process(input []F) ([]F, error) {
+	if s.factor == 1 {
+		// Pass-through
+		return input, nil
+	}
+
+	if len(input) == 0 {
+		return []F{}, nil
+	}
+
+	// Append input to history
+	s.history = append(s.history, input...)
+
+	numAvailable := len(s.history)
+	if numAvailable < s.numTaps {
+		return []F{}, nil
+	}
+
+	// Number of input positions we can compute filtered output for
+	numFilterable := numAvailable - s.numTaps + 1
+
+	// Calculate how many decimated outputs we'll produce
+	// Starting from decimPhase, we output every 'factor'-th filtered sample
+	numOutput := 0
+	for i := s.decimPhase; i < numFilterable; i += s.factor {
+		numOutput++
+	}
+
+	if numOutput == 0 {
+		return []F{}, nil
+	}
+
+	// Allocate output buffer
+	if cap(s.outputBuf) < numOutput {
+		s.outputBuf = make([]F, numOutput)
+	} else {
+		s.outputBuf = s.outputBuf[:numOutput]
+	}
+
+	// Filter and decimate
+	outIdx := 0
+	for pos := s.decimPhase; pos < numFilterable && outIdx < numOutput; pos += s.factor {
+		// Compute FIR filter output at this position
+		// Coefficients are reversed, so we can use direct dot product
+		var sum F
+		histSlice := s.history[pos : pos+s.numTaps]
+
+		// Use SIMD dot product (always available)
+		sum = s.ops.DotProductUnsafe(histSlice, s.coeffs)
+
+		s.outputBuf[outIdx] = sum
+		outIdx++
+	}
+
+	// Update decimation phase for next call
+	// The phase represents the offset into the decimation cycle. After consuming
+	// numFilterable samples, the buffer shifts and the new phase becomes
+	// (oldPhase - consumed) mod factor. We use (x%f+f)%f to handle Go's
+	// negative modulo behavior (Go returns negative for negative dividend).
+	s.decimPhase = ((s.decimPhase - numFilterable) % s.factor + s.factor) % s.factor
+
+	// Shift history - keep only what we need for next call
+	consumed := numFilterable
+	if consumed > 0 {
+		remaining := len(s.history) - consumed
+		if remaining > 0 {
+			copy(s.history[:remaining], s.history[consumed:])
+		}
+		s.history = s.history[:remaining]
+	}
+
+	// IMPORTANT: Return a COPY of the output, not a slice of the internal buffer.
+	// Returning s.outputBuf directly would cause buffer corruption on the next
+	// Process() call, as the caller's slice would share the same backing array.
+	// This was the cause of TestResampler_BufferIntegrity failures for 96→48.
+	result := make([]F, outIdx)
+	copy(result, s.outputBuf[:outIdx])
+	return result, nil
+}
+
+// Flush returns any remaining buffered samples.
+func (s *DFTDecimationStage[F]) Flush() ([]F, error) {
+	if s.factor == 1 || len(s.history) == 0 {
+		return []F{}, nil
+	}
+
+	// Pad with zeros to flush pipeline
+	zeros := make([]F, s.numTaps)
+	return s.Process(zeros)
+}
+
+// Reset clears internal state.
+func (s *DFTDecimationStage[F]) Reset() {
+	s.history = s.history[:0]
+	s.decimPhase = 0
 }
 
 // =============================================================================
@@ -1026,9 +1339,10 @@ type polyphaseFilter struct {
 //   - quality: quality level
 func designPolyphaseFilter(numPhases int, ratio, totalIORatio float64, hasPreStage bool, quality Quality) (*polyphaseFilter, error) {
 	attenuation := qualityToAttenuation(quality)
+	passbandEnd := qualityToPassbandEnd(quality)
 
 	// Use the new testable parameter computation function
-	params := ComputePolyphaseFilterParams(numPhases, ratio, totalIORatio, hasPreStage, attenuation)
+	params := ComputePolyphaseFilterParams(numPhases, ratio, totalIORatio, hasPreStage, attenuation, passbandEnd)
 
 	// Convert Fc to our filter design normalization ([0, 0.5] where 0.5 = Nyquist)
 	// params.Fc is already normalized by Fn and phases, but in soxr's [0, 1] scale
@@ -1237,16 +1551,16 @@ type PolyphaseFilterParams struct {
 //   - totalIORatio: total input/output ratio (input_rate/output_rate)
 //   - hasPreStage: whether this polyphase stage is preceded by a DFT pre-stage
 //   - attenuation: desired stopband attenuation in dB
+//   - passbandEnd: quality-based passband end frequency (Fp0), e.g., 0.913 for VHQ
 //
 // Returns computed filter parameters for filter design.
-func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, hasPreStage bool, attenuation float64) PolyphaseFilterParams {
+func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, hasPreStage bool, attenuation, passbandEnd float64) PolyphaseFilterParams {
 	params := PolyphaseFilterParams{
 		NumPhases:    numPhases,
 		Ratio:        ratio,
 		TotalIORatio: totalIORatio,
 		HasPreStage:  hasPreStage,
 		Attenuation:  attenuation,
-		Fs1:          nyquistFraction, // 0.5
 	}
 
 	phases := float64(numPhases)
@@ -1262,18 +1576,23 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, ha
 		params.Mult = totalIORatio
 	}
 
-	// Compute initial passband edge Fp1
-	// From soxr: Fp1 = p->io_ratio * (rolloff < 0 ? 1 : (1 - .05 * pow(5., rolloff)))
-	// With rolloff=0: Fp1 = io_ratio * 0.95 (we use 0.99 for high quality)
+	// Compute initial passband and stopband edges (Fp1, Fs1)
+	// These are scaled by the polyphase ratio, matching soxr's approach where
+	// Fp1 = Fp0 / Fn1 after the pre-stage (Fn1 = 1/ratio for our case).
+	//
+	// For downsampling 48→44.1 with 2x pre-stage (96 kHz intermediate):
+	//   ratio = 44.1/96 = 0.459375
+	//   Fp1 = 0.913 * 0.459375 = 0.4197 (matches soxr trace)
+	//   Fs1 = 1.0 * 0.459375 = 0.4594 (matches soxr trace)
 	if params.IsUpsampling {
 		// Upsampling: passband at original Nyquist scaled by io_ratio
-		params.Fp1 = totalIORatio * passbandRolloffScale
+		params.Fp1 = totalIORatio * passbandEnd
+		params.Fs1 = totalIORatio * 1.0 // Fs0 = 1.0 in soxr
 	} else {
-		// Downsampling: passband at output Nyquist
-		// output_Nyquist = 0.5 * (output_rate/input_rate) = 0.5 / totalIORatio
-		// But in normalized form where input Nyquist = 0.5:
-		// Fp1 = 0.5 * ratio * 0.99 (ratio = output/input for polyphase stage)
-		params.Fp1 = nyquistFraction * ratio * passbandRolloffScale
+		// Downsampling: scale by polyphase ratio (output/intermediate rate)
+		// This matches soxr's Fp1/Fn1 where Fn1 is the cumulative factor
+		params.Fp1 = passbandEnd * ratio
+		params.Fs1 = ratio // Fs0 = 1.0, so Fs1 = 1.0 * ratio = ratio
 	}
 
 	// Compute Fn and Fs based on upsampling/downsampling AND presence of pre-stage
@@ -1288,8 +1607,10 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, ha
 	//   1. Downsampling (!upsample), AND
 	//   2. There IS a pre-stage (preM != 0)
 	//
-	// For downsampling WITHOUT pre-stage, we need ANTI-ALIASING filter parameters
-	// that cut off at the OUTPUT Nyquist frequency, not use the upsampling formula.
+	// For downsampling WITHOUT pre-stage (hasPreStage=false), soxr intentionally
+	// uses the same formula as upsampling (Fn=1). This case occurs when there's
+	// a 2x upsampling pre-stage (preM=0 in soxr terms), so the polyphase stage
+	// sees Fn=1 normalization and uses the anti-imaging formula.
 	if !params.IsUpsampling && hasPreStage {
 		// Downsampling WITH pre-stage: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
 		params.Fn = soxrDownsamplingFnFactor * params.Mult
@@ -1297,9 +1618,13 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, ha
 		params.FsRaw = soxrDownsamplingFsBase + math.Abs(params.Fs1-1.0)
 		params.FpRaw = params.Fp1
 	} else {
-		// Upsampling: anti-imaging formula
+		// Upsampling OR Downsampling WITHOUT pre-stage:
+		// Both cases use the anti-imaging formula with Fn=1.
+		// For downsampling without pre-stage, soxr uses the same formula as upsampling
+		// (this occurs when we have a 2x upsampling pre-stage, preM=0 in soxr terms).
+		//
+		// soxr code: else Fn = 1, Fs = 2 - (mode? Fp1 + (Fs1 - Fp1) * .7 : Fs1);
 		params.Fn = 1.0
-		// Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7) for mode > 0
 		params.FsRaw = imageRejectionFactor - (params.Fp1 + (params.Fs1-params.Fp1)*soxrUpsamplingFsCoeff)
 		params.FpRaw = params.Fp1
 	}

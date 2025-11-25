@@ -257,9 +257,11 @@ func TestComputePolyphaseFilterParams_FnNormalization(t *testing.T) {
 		},
 	}
 
+	passbandEnd := 0.912 // QualityHigh passband end
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			params := ComputePolyphaseFilterParams(tc.numPhases, tc.ratio, tc.totalIORatio, tc.hasPreStage, attenuation)
+			params := ComputePolyphaseFilterParams(tc.numPhases, tc.ratio, tc.totalIORatio, tc.hasPreStage, attenuation, passbandEnd)
 
 			// Verify upsampling detection
 			assert.Equal(t, tc.isUpsampling, params.IsUpsampling,
@@ -307,13 +309,14 @@ func TestComputePolyphaseFilterParams_FnNormalization(t *testing.T) {
 // the hasPreStage parameter correctly changes the filter design parameters.
 func TestComputePolyphaseFilterParams_DownsamplingVsUpsampling(t *testing.T) {
 	const attenuation = 126.0 // QualityHigh
+	const passbandEnd = 0.912 // QualityHigh passband end
 
 	// Compare upsampling with pre-stage (our Go architecture)
 	// vs downsampling without pre-stage (our Go architecture)
 	// vs downsampling with pre-stage (hypothetical)
-	upParams := ComputePolyphaseFilterParams(147, 48000.0/44100.0, 44100.0/48000.0, true, attenuation)
-	downNoPreParams := ComputePolyphaseFilterParams(160, 44100.0/48000.0, 48000.0/44100.0, false, attenuation)
-	downWithPreParams := ComputePolyphaseFilterParams(160, 44100.0/48000.0, 48000.0/44100.0, true, attenuation)
+	upParams := ComputePolyphaseFilterParams(147, 48000.0/44100.0, 44100.0/48000.0, true, attenuation, passbandEnd)
+	downNoPreParams := ComputePolyphaseFilterParams(160, 44100.0/48000.0, 48000.0/44100.0, false, attenuation, passbandEnd)
+	downWithPreParams := ComputePolyphaseFilterParams(160, 44100.0/48000.0, 48000.0/44100.0, true, attenuation, passbandEnd)
 
 	// Upsampling should have Fn = 1
 	assert.InEpsilon(t, 1.0, upParams.Fn, 1e-9, "Upsampling Fn should be 1.0")

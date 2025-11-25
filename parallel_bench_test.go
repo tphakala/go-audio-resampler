@@ -15,10 +15,12 @@ func BenchmarkProcessMultiParallel(b *testing.B) {
 }
 
 func benchmarkProcessMulti(b *testing.B, parallel bool) {
+	b.Helper()
+
 	const (
 		inputRate  = 44100.0
 		outputRate = 48000.0
-		channels   = 2 // Stereo
+		channels   = 2     // Stereo
 		numSamples = 44100 // 1 second of audio
 	)
 
