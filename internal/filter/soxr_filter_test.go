@@ -192,7 +192,7 @@ func TestFilterFrequencyResponse_Stopband(t *testing.T) {
 
 			// Check stopband (cutoff + transitionBW to Nyquist)
 			stopbandStart := tc.cutoffFreq + tc.transitionBW/2
-			minAtten := 0.0
+			minAtten := math.MaxFloat64
 
 			for i, freq := range response.Frequencies {
 				if freq < stopbandStart {
@@ -201,7 +201,7 @@ func TestFilterFrequencyResponse_Stopband(t *testing.T) {
 
 				// Calculate attenuation (negative of gain)
 				atten := -MagnitudeDB(response.Magnitude[i])
-				if minAtten == 0.0 || atten < minAtten {
+				if atten < minAtten {
 					minAtten = atten
 				}
 			}
@@ -229,6 +229,7 @@ func TestFilterFrequencyResponse_6dBPoint(t *testing.T) {
 
 	// Find the frequency where gain crosses -6dB
 	var sixDBFreq float64
+	found := false
 	for i := 1; i < len(response.Frequencies); i++ {
 		gainDB := MagnitudeDB(response.Magnitude[i])
 		prevGainDB := MagnitudeDB(response.Magnitude[i-1])
@@ -237,10 +238,12 @@ func TestFilterFrequencyResponse_6dBPoint(t *testing.T) {
 			// Linear interpolation to find exact crossing
 			t := (prevGainDB - (-6.0)) / (prevGainDB - gainDB)
 			sixDBFreq = response.Frequencies[i-1] + t*(response.Frequencies[i]-response.Frequencies[i-1])
+			found = true
 			break
 		}
 	}
 
+	require.True(t, found, "filter did not cross -6dB point")
 	t.Logf("Cutoff frequency: %.4f, -6dB frequency: %.4f", cutoffFreq, sixDBFreq)
 
 	// Allow some tolerance due to windowing effects

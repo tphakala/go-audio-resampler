@@ -518,12 +518,15 @@ func TestPassbandRipple_48to44_Diagnostic(t *testing.T) {
 	t.Logf("Output Nyquist: %.0f Hz", outputRate/2)
 	t.Logf("")
 
-	minGain := 0.0
-	maxGain := 0.0
+	minGain := math.Inf(1)
+	maxGain := math.Inf(-1)
 
 	for _, testFreq := range testFreqs {
 		// Create fresh resampler for each test
-		resampler, _ := NewResampler[float64](inputRate, outputRate, QualityVeryHigh)
+		resampler, err := NewResampler[float64](inputRate, outputRate, QualityVeryHigh)
+		if err != nil {
+			t.Fatalf("Failed to create resampler for freq %.0f: %v", testFreq, err)
+		}
 
 		// Generate test sine wave
 		duration := 0.1
@@ -539,7 +542,10 @@ func TestPassbandRipple_48to44_Diagnostic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Process failed: %v", err)
 		}
-		flush, _ := resampler.Flush()
+		flush, err := resampler.Flush()
+		if err != nil {
+			t.Fatalf("Flush failed: %v", err)
+		}
 		output = append(output, flush...)
 
 		// Skip transients
