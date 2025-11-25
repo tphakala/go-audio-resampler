@@ -110,6 +110,8 @@ func (r *constantRateResampler) ProcessFloat32(input []float32) ([]float32, erro
 }
 
 // ProcessMulti processes multiple audio channels.
+// When EnableParallel is true in config, channels are processed concurrently.
+// Otherwise, channels are processed sequentially.
 func (r *constantRateResampler) ProcessMulti(input [][]float64) ([][]float64, error) {
 	if len(input) != r.config.Channels {
 		return nil, fmt.Errorf("expected %d channels, got %d", r.config.Channels, len(input))
@@ -117,7 +119,19 @@ func (r *constantRateResampler) ProcessMulti(input [][]float64) ([][]float64, er
 
 	output := make([][]float64, len(input))
 
-	// Process channels in parallel
+	// Sequential processing (default or when parallel disabled)
+	if !r.config.EnableParallel || len(input) <= 1 {
+		for ch := range input {
+			result, err := r.processChannel(ch, input[ch])
+			if err != nil {
+				return nil, fmt.Errorf("channel %d: %w", ch, err)
+			}
+			output[ch] = result
+		}
+		return output, nil
+	}
+
+	// Parallel processing: process channels concurrently
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(input))
 

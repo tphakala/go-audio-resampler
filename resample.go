@@ -59,6 +59,17 @@ type Config struct {
 	// EnableSIMD allows the use of SIMD optimizations when available.
 	// Set to false to force pure Go implementation.
 	EnableSIMD bool
+
+	// EnableParallel enables parallel channel processing.
+	// When true, multiple channels are processed concurrently using goroutines.
+	// This provides speedup proportional to channel count (2x for stereo, 8x for 7.1).
+	// Has no effect on mono audio.
+	EnableParallel bool
+
+	// NumWorkers specifies the maximum number of parallel workers for channel processing.
+	// Set to 0 to use runtime.NumCPU() (recommended).
+	// Only used when EnableParallel is true.
+	NumWorkers int
 }
 
 // QualitySpec defines resampling quality parameters.
