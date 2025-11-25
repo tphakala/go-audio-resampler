@@ -239,7 +239,6 @@ type Config struct {
     MaxInputSize   int          // Optional buffer size hint
     EnableSIMD     bool         // Enable SIMD optimizations
     EnableParallel bool         // Enable parallel channel processing
-    NumWorkers     int          // Max parallel workers (0 = NumCPU)
 }
 ```
 

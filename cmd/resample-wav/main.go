@@ -390,27 +390,34 @@ func resampleWAVGeneric[F Float](inputPath, outputPath string, targetRate int, q
 	}
 
 	// Flush remaining samples from resamplers
+	// Collect all flushed samples first, then interleave together to avoid
+	// writing partial channel data with zeros (which would create silence gaps)
+	flushedData := make([][]F, channels)
+	maxFlushLen := 0
 	for ch := range channels {
 		flushed, err := resamplers[ch].Flush()
 		if err != nil {
 			return nil, fmt.Errorf("failed to flush resampler channel %d: %w", ch, err)
 		}
-		if len(flushed) > 0 {
-			// Write flushed samples (single channel, need to handle specially)
-			channelData := make([][]F, channels)
-			for i := range channels {
-				if i == ch {
-					channelData[i] = flushed
-				} else {
-					channelData[i] = make([]F, len(flushed))
-				}
-			}
-			outputData := interleaveGeneric(channelData, bitDepth)
-			stats.outputSamples += int64(len(flushed))
+		flushedData[ch] = flushed
+		if len(flushed) > maxFlushLen {
+			maxFlushLen = len(flushed)
+		}
+	}
 
-			if err := fastWriter.WriteSamples(outputData); err != nil {
-				return nil, fmt.Errorf("failed to write flushed data: %w", err)
+	if maxFlushLen > 0 {
+		// Pad shorter channels to match longest
+		for ch := range channels {
+			if len(flushedData[ch]) < maxFlushLen {
+				padded := make([]F, maxFlushLen)
+				copy(padded, flushedData[ch])
+				flushedData[ch] = padded
 			}
+		}
+		outputData := interleaveGeneric(flushedData, bitDepth)
+		stats.outputSamples += int64(maxFlushLen)
+		if err := fastWriter.WriteSamples(outputData); err != nil {
+			return nil, fmt.Errorf("failed to write flushed data: %w", err)
 		}
 	}
 

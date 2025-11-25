@@ -65,11 +65,6 @@ type Config struct {
 	// This provides speedup proportional to channel count (2x for stereo, 8x for 7.1).
 	// Has no effect on mono audio.
 	EnableParallel bool
-
-	// NumWorkers specifies the maximum number of parallel workers for channel processing.
-	// Set to 0 to use runtime.NumCPU() (recommended).
-	// Only used when EnableParallel is true.
-	NumWorkers int
 }
 
 // QualitySpec defines resampling quality parameters.
