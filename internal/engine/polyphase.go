@@ -1296,6 +1296,17 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, ha
 		// Fs = 3 + |0.5 - 1| = 3.5
 		params.FsRaw = soxrDownsamplingFsBase + math.Abs(params.Fs1-1.0)
 		params.FpRaw = params.Fp1
+	} else if !params.IsUpsampling && !hasPreStage {
+		// Downsampling WITHOUT pre-stage: ANTI-ALIASING filter
+		// The filter MUST cut off at output Nyquist to prevent aliasing.
+		// Output Nyquist (normalized to input) = ratio * 0.5
+		// For 96kHz->48kHz: output Nyquist = 0.25 (in normalized form)
+		params.Fn = 1.0
+		// Stopband at output Nyquist with small margin for transition band
+		// We use 1.02 * output_Nyquist to allow a reasonable transition bandwidth
+		outputNyquist := ratio * nyquistFraction
+		params.FsRaw = outputNyquist * 1.02
+		params.FpRaw = params.Fp1
 	} else {
 		// Upsampling: anti-imaging formula
 		params.Fn = 1.0
