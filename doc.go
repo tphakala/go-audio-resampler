@@ -20,22 +20,29 @@
 //
 // # Quick Start
 //
-// For simple one-shot resampling:
+// For simple one-shot resampling (float64):
 //
-//	output, err := resampling.ResampleMono(input, 44100, 48000, resampling.QualityHigh)
+//	output, err := resampler.ResampleMono(input, 44100, 48000, resampler.QualityHigh)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//
+// For float32 audio data (common in real-time applications):
+//
+//	output, err := resampler.ResampleMonoFloat32(input, 44100, 48000, resampler.QualityHigh)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
 //
 // For streaming resampling with a reusable resampler:
 //
-//	config := &resampling.Config{
+//	config := &resampler.Config{
 //	    InputRate:  44100,
 //	    OutputRate: 48000,
 //	    Channels:   2,
-//	    Quality:    resampling.QualitySpec{Preset: resampling.QualityHigh},
+//	    Quality:    resampler.QualitySpec{Preset: resampler.QualityHigh},
 //	}
-//	r, err := resampling.New(config)
+//	r, err := resampler.New(config)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -79,6 +86,33 @@
 //   - [NewStereo]: Stereo resampler with configurable quality
 //   - [NewMultiChannel]: Multi-channel resampler
 //
+// # Float32 vs Float64 Precision
+//
+// The library provides two precision paths:
+//
+// Float64 (default): Maximum precision for mastering, archival, and critical applications.
+// Use [NewEngine], [SimpleResampler], [ResampleMono], and [ResampleStereo].
+//
+// Float32: ~2x SIMD throughput with 32-bit precision. Ideal for real-time applications,
+// game audio, streaming, and when memory bandwidth is a concern.
+// Use [NewEngineFloat32], [SimpleResamplerFloat32], [ResampleMonoFloat32], and [ResampleStereoFloat32].
+//
+// The float32 path provides a fully consistent API where both Process and Flush
+// return []float32, eliminating type conversion overhead:
+//
+//	r, err := resampler.NewEngineFloat32(44100, 48000, resampler.QualityHigh)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	for chunk := range audioChunks {
+//	    output, _ := r.Process(chunk)  // []float32 in, []float32 out
+//	    writeOutput(output)
+//	}
+//	final, _ := r.Flush()  // Returns []float32 (not []float64!)
+//
+// Helper functions for float32 stereo interleaving are also provided:
+// [InterleaveToStereoFloat32] and [DeinterleaveFromStereoFloat32].
+//
 // # Architecture
 //
 // The library implements a multi-stage resampling architecture similar to libsoxr:
@@ -97,14 +131,23 @@
 // For stereo audio, use [ResampleStereo] for one-shot processing or configure
 // a multi-channel resampler:
 //
-//	leftOut, rightOut, err := resampling.ResampleStereo(
+//	leftOut, rightOut, err := resampler.ResampleStereo(
 //	    leftChannel, rightChannel,
 //	    44100, 48000,
-//	    resampling.QualityHigh,
+//	    resampler.QualityHigh,
+//	)
+//
+// For float32 stereo audio, use [ResampleStereoFloat32]:
+//
+//	leftOut, rightOut, err := resampler.ResampleStereoFloat32(
+//	    leftChannel, rightChannel,
+//	    44100, 48000,
+//	    resampler.QualityHigh,
 //	)
 //
 // Helper functions [InterleaveToStereo] and [DeinterleaveFromStereo] are provided
-// for converting between interleaved and planar audio formats.
+// for converting between interleaved and planar audio formats. Float32 variants
+// [InterleaveToStereoFloat32] and [DeinterleaveFromStereoFloat32] are also available.
 //
 // # Parallel Processing
 //
