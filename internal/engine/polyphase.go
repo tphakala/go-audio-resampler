@@ -968,7 +968,7 @@ func (s *DFTDecimationStage[F]) Process(input []F) ([]F, error) {
 	// numFilterable samples, the buffer shifts and the new phase becomes
 	// (oldPhase - consumed) mod factor. We use (x%f+f)%f to handle Go's
 	// negative modulo behavior (Go returns negative for negative dividend).
-	s.decimPhase = ((s.decimPhase - numFilterable) % s.factor + s.factor) % s.factor
+	s.decimPhase = ((s.decimPhase-numFilterable)%s.factor + s.factor) % s.factor
 
 	// Shift history - keep only what we need for next call
 	consumed := numFilterable

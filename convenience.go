@@ -230,3 +230,163 @@ func DeinterleaveFromStereo(interleaved []float64) (left, right []float64) {
 	}
 	return left, right
 }
+
+// =============================================================================
+// Float32 Native API
+// =============================================================================
+//
+// The following types and functions provide a float32-native resampling path.
+// Use these when working with float32 audio data for:
+//   - ~2x SIMD throughput (256-bit SIMD processes 8×float32 vs 4×float64)
+//   - Reduced memory bandwidth
+//   - Consistent float32 throughout the pipeline (no type conversions)
+//
+// For maximum precision (mastering, archival), use the float64 API instead.
+
+// SimpleResamplerFloat32 provides a simplified float32-native interface for
+// basic resampling tasks. It wraps the engine.Resampler[float32] directly
+// for maximum performance with float32 audio data.
+//
+// Unlike using ProcessFloat32 on the main Resampler interface (where Flush
+// returns float64), SimpleResamplerFloat32 keeps everything in float32,
+// eliminating type conversion overhead.
+//
+// Example:
+//
+//	r, err := resampler.NewEngineFloat32(44100, 48000, resampler.QualityHigh)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	for chunk := range audioChunks {
+//	    output, _ := r.Process(chunk)  // []float32 in, []float32 out
+//	    writeOutput(output)
+//	}
+//	final, _ := r.Flush()  // Returns []float32!
+type SimpleResamplerFloat32 struct {
+	engine *engine.Resampler[float32]
+}
+
+// NewEngineFloat32 creates a SimpleResamplerFloat32 using the engine directly.
+// This bypasses the pipeline infrastructure for simpler use cases.
+// Uses float32 precision throughout for ~2x SIMD throughput compared to float64.
+//
+// Parameters:
+//   - inputRate: Input sample rate in Hz (e.g., 44100)
+//   - outputRate: Output sample rate in Hz (e.g., 48000)
+//   - quality: Quality preset controlling filter design and precision
+//
+// For maximum precision, use NewEngine (float64) instead.
+func NewEngineFloat32(inputRate, outputRate float64, quality QualityPreset) (*SimpleResamplerFloat32, error) {
+	engineQuality := presetToEngineQuality(quality)
+	r, err := engine.NewResampler[float32](inputRate, outputRate, engineQuality)
+	if err != nil {
+		return nil, err
+	}
+	return &SimpleResamplerFloat32{engine: r}, nil
+}
+
+// Process resamples the input samples.
+// Input and output are both float32, with no type conversion overhead.
+func (r *SimpleResamplerFloat32) Process(input []float32) ([]float32, error) {
+	return r.engine.Process(input)
+}
+
+// Flush returns any remaining buffered samples as float32.
+// Unlike the main Resampler.Flush() which returns float64, this returns
+// float32 for a consistent float32 workflow.
+func (r *SimpleResamplerFloat32) Flush() ([]float32, error) {
+	return r.engine.Flush()
+}
+
+// Reset clears internal state, allowing the resampler to be reused.
+func (r *SimpleResamplerFloat32) Reset() {
+	r.engine.Reset()
+}
+
+// GetRatio returns the resampling ratio (outputRate / inputRate).
+func (r *SimpleResamplerFloat32) GetRatio() float64 {
+	return r.engine.GetRatio()
+}
+
+// GetStatistics returns processing statistics including samples processed.
+func (r *SimpleResamplerFloat32) GetStatistics() map[string]int64 {
+	return r.engine.GetStatistics()
+}
+
+// ResampleMonoFloat32 is a convenience function for one-shot mono resampling
+// with float32 samples. It creates a resampler, processes the input, flushes,
+// and returns the result.
+//
+// This is the float32 equivalent of ResampleMono. Use this when:
+//   - Your audio data is already in float32 format
+//   - You want ~2x SIMD throughput compared to float64
+//   - 32-bit precision is sufficient (most real-time applications)
+//
+// For maximum precision (mastering, archival), use ResampleMono instead.
+func ResampleMonoFloat32(input []float32, inputRate, outputRate float64, quality QualityPreset) ([]float32, error) {
+	r, err := NewEngineFloat32(inputRate, outputRate, quality)
+	if err != nil {
+		return nil, err
+	}
+
+	output, err := r.Process(input)
+	if err != nil {
+		return nil, err
+	}
+
+	flushed, err := r.Flush()
+	if err != nil {
+		return nil, err
+	}
+
+	return append(output, flushed...), nil
+}
+
+// ResampleStereoFloat32 is a convenience function for one-shot stereo resampling
+// with float32 samples. Input is expected as [left, right] channels.
+//
+// This is the float32 equivalent of ResampleStereo.
+func ResampleStereoFloat32(left, right []float32, inputRate, outputRate float64, quality QualityPreset) (leftOut, rightOut []float32, err error) {
+	// Process left channel
+	leftOut, err = ResampleMonoFloat32(left, inputRate, outputRate, quality)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Process right channel
+	rightOut, err = ResampleMonoFloat32(right, inputRate, outputRate, quality)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return leftOut, rightOut, nil
+}
+
+// InterleaveToStereoFloat32 converts two mono float32 channels to interleaved stereo.
+// Output format: [L0, R0, L1, R1, L2, R2, ...]
+//
+// This is the float32 equivalent of InterleaveToStereo.
+func InterleaveToStereoFloat32(left, right []float32) []float32 {
+	minLen := min(len(left), len(right))
+	result := make([]float32, minLen*stereoChannels)
+	for i := range minLen {
+		result[i*stereoChannels] = left[i]
+		result[i*stereoChannels+1] = right[i]
+	}
+	return result
+}
+
+// DeinterleaveFromStereoFloat32 converts interleaved stereo float32 to two mono channels.
+// Input format: [L0, R0, L1, R1, L2, R2, ...]
+//
+// This is the float32 equivalent of DeinterleaveFromStereo.
+func DeinterleaveFromStereoFloat32(interleaved []float32) (left, right []float32) {
+	numSamples := len(interleaved) / stereoChannels
+	left = make([]float32, numSamples)
+	right = make([]float32, numSamples)
+	for i := range numSamples {
+		left[i] = interleaved[i*stereoChannels]
+		right[i] = interleaved[i*stereoChannels+1]
+	}
+	return left, right
+}
