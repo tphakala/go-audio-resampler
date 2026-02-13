@@ -389,6 +389,7 @@ func TestQualityPresets_ComprehensiveSummary(t *testing.T) {
 	}
 
 	summary := make([]summaryRow, 0, len(qualityPresets))
+	soxrAvailable := false
 
 	for _, preset := range qualityPresets {
 		row := summaryRow{preset: preset.name}
@@ -397,6 +398,7 @@ func TestQualityPresets_ComprehensiveSummary(t *testing.T) {
 		if soxrResult, err := runSoxrQualityTestWithPreset(t.Context(), inputRate, outputRate,
 			fmt.Sprintf("thd:%.0f", testFreq), preset.soxrQuality); err == nil {
 			row.soxrTHD = soxrResult["thd_db"]
+			soxrAvailable = true
 		}
 
 		// Get Go THD
@@ -408,6 +410,7 @@ func TestQualityPresets_ComprehensiveSummary(t *testing.T) {
 		if soxrResult, err := runSoxrQualityTestWithPreset(t.Context(), inputRate, outputRate,
 			fmt.Sprintf("snr:%.0f", testFreq), preset.soxrQuality); err == nil {
 			row.soxrSNR = soxrResult["snr_db"]
+			soxrAvailable = true
 		}
 
 		// Get Go SNR
@@ -420,6 +423,10 @@ func TestQualityPresets_ComprehensiveSummary(t *testing.T) {
 		row.snrMatch = math.Abs(row.goSNR-row.soxrSNR) < 20.0
 
 		summary = append(summary, row)
+	}
+
+	if !soxrAvailable {
+		t.Skip("soxr reference tool not available, skipping comparison")
 	}
 
 	// Print summary table
