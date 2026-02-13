@@ -23,11 +23,8 @@ import (
 	"path/filepath"
 	"runtime/pprof"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/go-audio/audio"
-	"github.com/go-audio/wav"
 	"github.com/tphakala/go-audio-resampler/internal/engine"
 )
 
@@ -215,105 +212,55 @@ type Float interface {
 }
 
 func resampleWAVGeneric[F Float](inputPath, outputPath string, targetRate int, quality engine.Quality, verbose, parallel bool) (*resampleStats, error) {
-	// Open input file
-	inputFile, err := os.Open(inputPath)
+	// 1. Open and validate input
+	input, err := openWAVInput(inputPath, verbose)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open input file: %w", err)
+		return nil, err
 	}
-	defer func() { _ = inputFile.Close() }()
-
-	// Create WAV decoder
-	decoder := wav.NewDecoder(inputFile)
-	if !decoder.IsValidFile() {
-		return nil, fmt.Errorf("invalid WAV file: %s", inputPath)
-	}
-
-	// Read format info
-	format := decoder.Format()
-	inputRate := format.SampleRate
-	channels := format.NumChannels
-	bitDepth := int(decoder.BitDepth)
-
-	if verbose {
-		log.Printf("Input format: %d Hz, %d channels, %d-bit", inputRate, channels, bitDepth)
-	}
+	defer func() { _ = input.Close() }()
 
 	// Check if resampling is needed
-	if inputRate == targetRate {
+	if input.rate == targetRate {
 		return nil, fmt.Errorf("input already at target rate %d Hz", targetRate)
 	}
 
-	// Create resamplers for each channel
-	resamplers := make([]*engine.Resampler[F], channels)
-	for ch := range channels {
-		r, err := engine.NewResampler[F](float64(inputRate), float64(targetRate), quality)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create resampler for channel %d: %w", ch, err)
-		}
-		resamplers[ch] = r
-	}
-
-	// Create output file
-	outputFile, err := os.Create(outputPath)
+	// 2. Create resamplers
+	resamplers, err := createChannelResamplers[F](
+		input.channels, input.rate, targetRate, quality,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create output file: %w", err)
+		return nil, err
 	}
-	defer func() { _ = outputFile.Close() }()
 
-	// Create fast WAV writer (bypasses slow go-audio/wav encoder)
-	outputFormat := &audio.Format{
-		SampleRate:  targetRate,
-		NumChannels: channels,
-	}
-	_ = outputFormat // Used for compatibility, fast writer handles format internally
-	fastWriter, err := newFastWAVWriter(outputFile, targetRate, bitDepth, channels)
+	// 3. Create output writer
+	output, err := createWAVOutput(
+		outputPath, targetRate, input.bitDepth, input.channels,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create WAV writer: %w", err)
+		return nil, err
 	}
-	defer func() { _ = fastWriter.Close() }()
+	defer func() { _ = output.Close() }()
 
-	// Process audio in chunks
+	// 4. Initialize processing buffers
+	buffers := newResampleBuffers[F](
+		input.channels, input.bitDepth,
+		input.rate, targetRate,
+		input.format,
+	)
+
+	// 5. Initialize tracking
 	stats := &resampleStats{
-		inputRate:  inputRate,
+		inputRate:  input.rate,
 		outputRate: targetRate,
-		channels:   channels,
-		bitDepth:   bitDepth,
+		channels:   input.channels,
+		bitDepth:   input.bitDepth,
 	}
+	progress := newProgressTracker(input.totalSamples, verbose)
 
-	// Get total duration for progress reporting
-	duration, err := decoder.Duration()
-	if err != nil {
-		duration = 0
-	}
-	totalSamples := int64(duration.Seconds() * float64(inputRate))
-
-	// Preallocate buffers for reuse (reduces GC pressure)
-	intBuffer := &audio.IntBuffer{
-		Data:   make([]int, bufferSize*channels),
-		Format: format,
-	}
-
-	// Preallocate per-channel input buffers
-	channelBufs := make([][]F, channels)
-	for ch := range channels {
-		channelBufs[ch] = make([]F, bufferSize)
-	}
-
-	// Preallocate resampled channel slice (reused each iteration)
-	resampledChannels := make([][]F, channels)
-
-	// Preallocate output buffer with estimated size (ratio * input + margin)
-	estimatedOutputSize := int(float64(bufferSize)*float64(targetRate)/float64(inputRate)) + outputBufferMargin
-	outputIntBuf := make([]int, estimatedOutputSize*channels)
-
-	// Precompute max value for bit depth
-	maxVal := getMaxValue(bitDepth)
-	invMaxVal := 1.0 / maxVal
-
-	var lastProgress int
+	// 6. Main processing loop
 	for {
-		// Read chunk from input
-		n, err := decoder.PCMBuffer(intBuffer)
+		// Read chunk
+		n, err := input.decoder.PCMBuffer(buffers.intBuffer)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("failed to read audio data: %w", err)
 		}
@@ -321,102 +268,57 @@ func resampleWAVGeneric[F Float](inputPath, outputPath string, targetRate int, q
 			break
 		}
 
-		// Trim buffer to actual samples read
-		intBuffer.Data = intBuffer.Data[:n*channels]
+		// Update tracking
+		buffers.intBuffer.Data = buffers.intBuffer.Data[:n*input.channels]
 		stats.inputSamples += int64(n)
 
-		// Convert interleaved int samples to per-channel float (reusing buffers)
-		deinterleaveInto(intBuffer.Data, channelBufs, channels, n, invMaxVal)
+		// Deinterleave
+		deinterleaveInto(
+			buffers.intBuffer.Data,
+			buffers.channelBufs,
+			input.channels, n,
+			buffers.invMaxVal,
+		)
 
-		// Resample each channel (parallel or sequential based on config)
-		if parallel && channels > 1 {
-			// Parallel processing: process all channels concurrently
-			var wg sync.WaitGroup
-			var processErr error
-			var errMu sync.Mutex
-
-			for ch := range channels {
-				wg.Add(1)
-				go func(channel int) {
-					defer wg.Done()
-					resampled, err := resamplers[channel].Process(channelBufs[channel][:n])
-					if err != nil {
-						errMu.Lock()
-						if processErr == nil {
-							processErr = fmt.Errorf("resampling failed on channel %d: %w", channel, err)
-						}
-						errMu.Unlock()
-						return
-					}
-					resampledChannels[channel] = resampled
-				}(ch)
-			}
-			wg.Wait()
-
-			if processErr != nil {
-				return nil, processErr
-			}
-		} else {
-			// Sequential processing
-			for ch := range channels {
-				resampled, err := resamplers[ch].Process(channelBufs[ch][:n])
-				if err != nil {
-					return nil, fmt.Errorf("resampling failed on channel %d: %w", ch, err)
-				}
-				resampledChannels[ch] = resampled
-			}
+		// Resample channels (handles parallel/sequential)
+		resampledChannels, err := resampleChannelData(
+			resamplers,
+			buffers.channelBufs,
+			n,
+			parallel,
+		)
+		if err != nil {
+			return nil, err
 		}
 
-		// Convert back to interleaved int samples (reusing buffer)
-		outputLen := interleaveInto(resampledChannels, outputIntBuf, maxVal)
-		stats.outputSamples += int64(outputLen / channels)
+		// Interleave and write
+		outputLen := interleaveInto(
+			resampledChannels,
+			buffers.outputIntBuf,
+			buffers.maxVal,
+		)
+		stats.outputSamples += int64(outputLen / input.channels)
 
-		// Write to output using fast writer
-		if err := fastWriter.WriteSamples(outputIntBuf[:outputLen]); err != nil {
+		if err := output.WriteSamples(buffers.outputIntBuf[:outputLen]); err != nil {
 			return nil, fmt.Errorf("failed to write audio data: %w", err)
 		}
 
 		// Progress reporting
-		if verbose && totalSamples > 0 {
-			progress := int(float64(stats.inputSamples) / float64(totalSamples) * percentScale)
-			if progress >= lastProgress+progressInterval {
-				log.Printf("Progress: %d%%", progress)
-				lastProgress = progress
-			}
-		}
+		progress.reportIfNeeded(stats.inputSamples)
 
-		// Reset buffer for next iteration
-		intBuffer.Data = intBuffer.Data[:cap(intBuffer.Data)]
+		// Reset buffer
+		buffers.intBuffer.Data = buffers.intBuffer.Data[:cap(buffers.intBuffer.Data)]
 	}
 
-	// Flush remaining samples from resamplers
-	// Collect all flushed samples first, then interleave together to avoid
-	// writing partial channel data with zeros (which would create silence gaps)
-	flushedData := make([][]F, channels)
-	maxFlushLen := 0
-	for ch := range channels {
-		flushed, err := resamplers[ch].Flush()
-		if err != nil {
-			return nil, fmt.Errorf("failed to flush resampler channel %d: %w", ch, err)
-		}
-		flushedData[ch] = flushed
-		if len(flushed) > maxFlushLen {
-			maxFlushLen = len(flushed)
-		}
+	// 7. Flush remaining samples
+	flushedData, flushedSamples, err := flushAndPadChannels(resamplers, input.bitDepth)
+	if err != nil {
+		return nil, err
 	}
 
-	if maxFlushLen > 0 {
-		// Pad shorter channels to match longest
-		for ch := range channels {
-			if len(flushedData[ch]) < maxFlushLen {
-				padded := make([]F, maxFlushLen)
-				copy(padded, flushedData[ch])
-				flushedData[ch] = padded
-			}
-		}
-		outputData := interleaveGeneric(flushedData, bitDepth)
-		stats.outputSamples += int64(maxFlushLen)
-		if err := fastWriter.WriteSamples(outputData); err != nil {
+	if flushedSamples > 0 {
+		stats.outputSamples += int64(flushedSamples)
+		if err := output.WriteSamples(flushedData); err != nil {
 			return nil, fmt.Errorf("failed to write flushed data: %w", err)
 		}
 	}
