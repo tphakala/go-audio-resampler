@@ -211,7 +211,7 @@ type Float interface {
 	float32 | float64
 }
 
-func resampleWAVGeneric[F Float](inputPath, outputPath string, targetRate int, quality engine.Quality, verbose, parallel bool) (*resampleStats, error) {
+func resampleWAVGeneric[F Float](inputPath, outputPath string, targetRate int, quality engine.Quality, verbose, parallel bool) (stats *resampleStats, err error) {
 	// 1. Open and validate input
 	input, err := openWAVInput(inputPath, verbose)
 	if err != nil {
@@ -239,7 +239,12 @@ func resampleWAVGeneric[F Float](inputPath, outputPath string, targetRate int, q
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = output.Close() }()
+	// Close output, capturing close errors on success path (important for WAV header updates)
+	defer func() {
+		if closeErr := output.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 
 	// 4. Initialize processing buffers
 	buffers := newResampleBuffers[F](
@@ -249,7 +254,7 @@ func resampleWAVGeneric[F Float](inputPath, outputPath string, targetRate int, q
 	)
 
 	// 5. Initialize tracking
-	stats := &resampleStats{
+	stats = &resampleStats{
 		inputRate:  input.rate,
 		outputRate: targetRate,
 		channels:   input.channels,
