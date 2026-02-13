@@ -302,6 +302,12 @@ func resampleWAVGeneric[F Float](inputPath, outputPath string, targetRate int, q
 			buffers.outputIntBuf,
 			buffers.maxVal,
 		)
+		if outputLen == 0 && len(resampledChannels) > 0 && len(resampledChannels[0]) > 0 {
+			// Output buffer too small — this indicates estimatedOutputSize was insufficient
+			needed := len(resampledChannels[0]) * len(resampledChannels)
+			buffers.outputIntBuf = make([]int, needed)
+			outputLen = interleaveInto(resampledChannels, buffers.outputIntBuf, buffers.maxVal)
+		}
 		stats.outputSamples += int64(outputLen / input.channels)
 
 		if err := output.WriteSamples(buffers.outputIntBuf[:outputLen]); err != nil {
