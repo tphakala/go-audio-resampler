@@ -264,9 +264,9 @@ func TestPolyphaseFilterBank_DCGain(t *testing.T) {
 	// Check DC gain across multiple phases (soxr-style: each phase ≈ 1.0)
 	// The average DC gain across all phases should be approximately 1.0
 	var totalDCGain float64
-	for phase := 0; phase < pfb.NumPhases; phase++ {
+	for phase := range pfb.NumPhases {
 		var phaseSum float64
-		for tap := 0; tap < pfb.TapsPerPhase; tap++ {
+		for tap := range pfb.TapsPerPhase {
 			phaseSum += pfb.GetCoefficient(tap, phase, 0.0)
 		}
 		totalDCGain += phaseSum

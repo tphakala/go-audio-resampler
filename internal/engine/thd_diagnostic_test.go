@@ -135,7 +135,7 @@ func TestDFTStage_CoefficientAnalysis(t *testing.T) {
 	t.Logf("Phase 0 tap scale: %.10f", dftStage.phase0TapScale)
 
 	// Analyze each phase's DC gain (sum of coefficients)
-	for phase := 0; phase < dftStage.factor; phase++ {
+	for phase := range dftStage.factor {
 		sum := 0.0
 		for _, c := range dftStage.polyCoeffs[phase] {
 			sum += c
@@ -363,8 +363,8 @@ func TestDFTStage_FilterResponse(t *testing.T) {
 	prototype := make([]float64, totalTaps)
 
 	// Coefficients are stored reversed, so we need to un-reverse them
-	for phase := 0; phase < dftStage.factor; phase++ {
-		for tap := 0; tap < dftStage.tapsPerPhase; tap++ {
+	for phase := range dftStage.factor {
+		for tap := range dftStage.tapsPerPhase {
 			// polyCoeffs[phase][tapsPerPhase-1-tap] = prototype[tap*factor + phase] * factor
 			// So: prototype[tap*factor + phase] = polyCoeffs[phase][tapsPerPhase-1-tap] / factor
 			protoIdx := tap*dftStage.factor + phase
@@ -426,7 +426,7 @@ func TestDFTStage_FilterResponse(t *testing.T) {
 
 	// Check phase gains
 	t.Logf("\nPer-phase DC gain (should each be ~1.0):")
-	for phase := 0; phase < dftStage.factor; phase++ {
+	for phase := range dftStage.factor {
 		phaseSum := 0.0
 		for _, c := range dftStage.polyCoeffs[phase] {
 			phaseSum += c
@@ -768,7 +768,7 @@ func TestDFTStage_DirectUpsample(t *testing.T) {
 	filterLen := len(prototype)
 	output := make([]float64, len(stuffed)-filterLen+1)
 
-	for i := 0; i < len(output); i++ {
+	for i := range len(output) {
 		sum := 0.0
 		for j := range filterLen {
 			sum += stuffed[i+j] * prototype[filterLen-1-j] // Note: prototype is not reversed for proper conv
@@ -982,7 +982,7 @@ func TestDFTStage_THDComparison(t *testing.T) {
 		// Check if outputs are numerically different
 		maxDiff := 0.0
 		maxDiffIdx := 0
-		for i := 0; i < min(len(simdOutput), len(goOutput)); i++ {
+		for i := range min(len(simdOutput), len(goOutput)) {
 			diff := math.Abs(simdOutput[i] - goOutput[i])
 			if diff > maxDiff {
 				maxDiff = diff
@@ -1094,7 +1094,7 @@ func TestDFTStage_ProcessChunkedBug(t *testing.T) {
 	}
 
 	// Find first mismatch
-	for i := 0; i < min(len(simdOutput), len(goOutput)); i++ {
+	for i := range min(len(simdOutput), len(goOutput)) {
 		diff := math.Abs(simdOutput[i] - goOutput[i])
 		if diff > 1e-10 {
 			t.Logf("\nFirst mismatch at sample %d", i)
@@ -1188,7 +1188,7 @@ func TestDFTStage_DirectComparison(t *testing.T) {
 	}
 
 	// Find overall max diff
-	for i := 0; i < min(len(simdOutput), len(goOutput)); i++ {
+	for i := range min(len(simdOutput), len(goOutput)) {
 		diff := simdOutput[i] - goOutput[i]
 		if math.Abs(diff) > math.Abs(maxDiff) {
 			maxDiff = diff
@@ -1203,7 +1203,7 @@ func TestDFTStage_DirectComparison(t *testing.T) {
 	phase1Diff := 0.0
 	phase0Count := 0
 	phase1Count := 0
-	for i := 0; i < min(len(simdOutput), len(goOutput)); i++ {
+	for i := range min(len(simdOutput), len(goOutput)) {
 		diff := math.Abs(simdOutput[i] - goOutput[i])
 		if i%2 == 0 {
 			phase0Diff += diff

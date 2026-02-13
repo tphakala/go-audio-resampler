@@ -212,7 +212,7 @@ func fft(x []complex128) []complex128 {
 		wm := cmplx.Exp(complex(0, -2*math.Pi/float64(m)))
 		for k := 0; k < n; k += m {
 			w := complex(1, 0)
-			for j := 0; j < m/2; j++ {
+			for j := range m / 2 {
 				t := w * result[k+j+m/2]
 				u := result[k+j]
 				result[k+j] = u + t
@@ -340,7 +340,7 @@ func measureAntiAliasing(inputRate, outputRate float64, signalType SignalType, q
 // getSoxrAntiAliasingResult runs the soxr reference tool.
 // The tool path can be set via SOXR_ANTIALIAS_TOOL environment variable,
 // otherwise it defaults to test-reference/test_antialiasing relative to the source file.
-func getSoxrAntiAliasingResult(inputRate, outputRate float64, signalType SignalType) (*AntiAliasingResult, error) {
+func getSoxrAntiAliasingResult(ctx context.Context, inputRate, outputRate float64, signalType SignalType) (*AntiAliasingResult, error) {
 	toolPath := os.Getenv("SOXR_ANTIALIAS_TOOL")
 	if toolPath == "" {
 		// Default to relative path from this source file
@@ -352,7 +352,7 @@ func getSoxrAntiAliasingResult(inputRate, outputRate float64, signalType SignalT
 		toolPath = filepath.Join(filepath.Dir(thisFile), "..", "..", "test-reference", "test_antialiasing")
 	}
 
-	cmd := exec.CommandContext(context.Background(), toolPath,
+	cmd := exec.CommandContext(ctx, toolPath,
 		fmt.Sprintf("%.0f", inputRate),
 		fmt.Sprintf("%.0f", outputRate),
 		signalType.String())
@@ -475,7 +475,7 @@ func TestAntiAliasing_CompareWithSoxr(t *testing.T) {
 		name := fmt.Sprintf("%.0fto%.0f_%s", tc.inputRate, tc.outputRate, tc.signalType)
 		t.Run(name, func(t *testing.T) {
 			// Get soxr reference result
-			soxrResult, err := getSoxrAntiAliasingResult(tc.inputRate, tc.outputRate, tc.signalType)
+			soxrResult, err := getSoxrAntiAliasingResult(t.Context(), tc.inputRate, tc.outputRate, tc.signalType)
 			if err != nil {
 				t.Skipf("soxr reference not available: %v", err)
 			}
@@ -741,7 +741,7 @@ func TestAntiAliasing_Downsampling_CompareWithSoxr(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Get soxr reference result
-			soxrResult, err := getSoxrAntiAliasingResult(tc.inputRate, tc.outputRate, SignalAliasTones)
+			soxrResult, err := getSoxrAntiAliasingResult(t.Context(), tc.inputRate, tc.outputRate, SignalAliasTones)
 			if err != nil {
 				t.Skipf("soxr reference not available: %v", err)
 			}

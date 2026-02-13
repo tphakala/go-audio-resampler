@@ -11,7 +11,7 @@ func TestDebugSoxrComparison(t *testing.T) {
 	frequency := 1000.0
 
 	// Get soxr reference
-	soxrOut, err := getSoxrReference(inputRate, outputRate, "sine", frequency)
+	soxrOut, err := getSoxrReference(t.Context(), inputRate, outputRate, "sine", frequency)
 	if err != nil {
 		t.Skipf("soxr reference not available: %v", err)
 	}

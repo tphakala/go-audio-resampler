@@ -43,7 +43,7 @@ func TestDFTStage_Reset(t *testing.T) {
 	assert.Len(t, output2, len(outputFresh),
 		"Output length after reset should match fresh stage")
 
-	for i := 0; i < min(len(output2), len(outputFresh)); i++ {
+	for i := range min(len(output2), len(outputFresh)) {
 		assert.InDelta(t, outputFresh[i], output2[i], 1e-15,
 			"Output[%d] after reset differs from fresh stage", i)
 	}
@@ -82,7 +82,7 @@ func TestPolyphaseStage_Reset(t *testing.T) {
 	assert.Len(t, output2, len(outputFresh),
 		"Output length after reset should match fresh stage")
 
-	for i := 0; i < min(len(output2), len(outputFresh)); i++ {
+	for i := range min(len(output2), len(outputFresh)) {
 		assert.InDelta(t, outputFresh[i], output2[i], 1e-15,
 			"Output[%d] after reset differs from fresh stage", i)
 	}
@@ -133,7 +133,7 @@ func TestResampler_Reset(t *testing.T) {
 			assert.Len(t, output2, len(outputFresh),
 				"Output length after reset should match fresh resampler")
 
-			for i := 0; i < min(len(output2), len(outputFresh)); i++ {
+			for i := range min(len(output2), len(outputFresh)) {
 				assert.InDelta(t, outputFresh[i], output2[i], 1e-15,
 					"Output[%d] after reset differs from fresh resampler", i)
 			}
@@ -195,7 +195,7 @@ func TestInterpolationStages_Reset(t *testing.T) {
 			assert.Len(t, output2, len(outputFresh),
 				"Output length after reset should match fresh stage")
 
-			for i := 0; i < min(len(output2), len(outputFresh)); i++ {
+			for i := range min(len(output2), len(outputFresh)) {
 				assert.InDelta(t, outputFresh[i], output2[i], 1e-15,
 					"Output[%d] after reset differs from fresh stage", i)
 			}

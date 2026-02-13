@@ -151,7 +151,7 @@ func DesignLowPassFilter(params FilterParams) ([]float64, error) {
 	filter := make([]float64, params.NumTaps)
 	center := float64(params.NumTaps-1) / windowNormalizationFactor
 
-	for n := 0; n < params.NumTaps; n++ {
+	for n := range params.NumTaps {
 		// Calculate position relative to center
 		x := float64(n) - center
 
@@ -249,7 +249,7 @@ func ComputeFrequencyResponse(coeffs []float64, numPoints int) FilterResponse {
 	}
 
 	// Evaluate frequency response at numPoints frequencies from 0 to Nyquist
-	for k := 0; k < numPoints; k++ {
+	for k := range numPoints {
 		// Normalized frequency (0 to 0.5)
 		freq := float64(k) / float64(windowNormalizationFactor*numPoints)
 		response.Frequencies[k] = freq

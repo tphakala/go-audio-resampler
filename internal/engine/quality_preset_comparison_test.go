@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // =============================================================================
@@ -46,7 +47,7 @@ var qualityPresets = []qualityPresetPair{
 }
 
 // runSoxrQualityTestWithPreset runs the soxr quality test tool with a specific preset
-func runSoxrQualityTestWithPreset(inputRate, outputRate float64, testType, quality string) (map[string]float64, error) {
+func runSoxrQualityTestWithPreset(ctx context.Context, inputRate, outputRate float64, testType, quality string) (map[string]float64, error) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return nil, fmt.Errorf("failed to get current file path")
@@ -59,7 +60,7 @@ func runSoxrQualityTestWithPreset(inputRate, outputRate float64, testType, quali
 		return nil, fmt.Errorf("soxr quality tool not found at %s (run 'make test_quality' in test-reference/)", toolPath)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*1000*1000*1000) // 30 seconds
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, toolPath,
@@ -119,7 +120,7 @@ func TestTHD_AllQualityPresets(t *testing.T) {
 			testName := fmt.Sprintf("%s/%s", preset.name, tc.name)
 			t.Run(testName, func(t *testing.T) {
 				// Get SOXR reference
-				soxrResult, err := runSoxrQualityTestWithPreset(tc.inputRate, tc.outputRate,
+				soxrResult, err := runSoxrQualityTestWithPreset(t.Context(), tc.inputRate, tc.outputRate,
 					fmt.Sprintf("thd:%.0f", tc.testFreq), preset.soxrQuality)
 				if err != nil {
 					t.Skipf("soxr reference not available: %v", err)
@@ -180,7 +181,7 @@ func TestSNR_AllQualityPresets(t *testing.T) {
 			testName := fmt.Sprintf("%s/%s", preset.name, tc.name)
 			t.Run(testName, func(t *testing.T) {
 				// Get SOXR reference
-				soxrResult, err := runSoxrQualityTestWithPreset(tc.inputRate, tc.outputRate,
+				soxrResult, err := runSoxrQualityTestWithPreset(t.Context(), tc.inputRate, tc.outputRate,
 					fmt.Sprintf("snr:%.0f", testFreq), preset.soxrQuality)
 				if err != nil {
 					t.Skipf("soxr reference not available: %v", err)
@@ -233,7 +234,7 @@ func TestPassbandRipple_AllQualityPresets(t *testing.T) {
 			testName := fmt.Sprintf("%s/%s", preset.name, tc.name)
 			t.Run(testName, func(t *testing.T) {
 				// Get SOXR reference
-				soxrResult, err := runSoxrQualityTestWithPreset(tc.inputRate, tc.outputRate,
+				soxrResult, err := runSoxrQualityTestWithPreset(t.Context(), tc.inputRate, tc.outputRate,
 					"ripple", preset.soxrQuality)
 				if err != nil {
 					t.Skipf("soxr reference not available: %v", err)
@@ -286,7 +287,7 @@ func TestImpulseResponse_AllQualityPresets(t *testing.T) {
 			testName := fmt.Sprintf("%s/%s", preset.name, tc.name)
 			t.Run(testName, func(t *testing.T) {
 				// Get SOXR reference
-				soxrResult, err := runSoxrQualityTestWithPreset(tc.inputRate, tc.outputRate,
+				soxrResult, err := runSoxrQualityTestWithPreset(t.Context(), tc.inputRate, tc.outputRate,
 					"impulse", preset.soxrQuality)
 				if err != nil {
 					t.Skipf("soxr reference not available: %v", err)
@@ -393,7 +394,7 @@ func TestQualityPresets_ComprehensiveSummary(t *testing.T) {
 		row := summaryRow{preset: preset.name}
 
 		// Get SOXR THD
-		if soxrResult, err := runSoxrQualityTestWithPreset(inputRate, outputRate,
+		if soxrResult, err := runSoxrQualityTestWithPreset(t.Context(), inputRate, outputRate,
 			fmt.Sprintf("thd:%.0f", testFreq), preset.soxrQuality); err == nil {
 			row.soxrTHD = soxrResult["thd_db"]
 		}
@@ -404,7 +405,7 @@ func TestQualityPresets_ComprehensiveSummary(t *testing.T) {
 		}
 
 		// Get SOXR SNR
-		if soxrResult, err := runSoxrQualityTestWithPreset(inputRate, outputRate,
+		if soxrResult, err := runSoxrQualityTestWithPreset(t.Context(), inputRate, outputRate,
 			fmt.Sprintf("snr:%.0f", testFreq), preset.soxrQuality); err == nil {
 			row.soxrSNR = soxrResult["snr_db"]
 		}

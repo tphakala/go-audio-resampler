@@ -7,7 +7,7 @@ import (
 
 func TestDebug96kTo48kDC(t *testing.T) {
 	// Get soxr reference
-	soxrOut, err := getSoxrReference(96000, 48000, "dc", 0)
+	soxrOut, err := getSoxrReference(t.Context(), 96000, 48000, "dc", 0)
 	if err != nil {
 		t.Skip(err)
 	}

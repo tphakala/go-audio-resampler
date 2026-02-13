@@ -56,7 +56,7 @@ func benchConvolveValid(b *testing.B, taps, signalLen int) {
 	b.ResetTimer()
 	b.SetBytes(int64(signalLen * 8)) // bytes processed
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		ops.ConvolveValid(dst, signal, kernel)
 	}
 
@@ -97,7 +97,7 @@ func benchConvolveValidMulti(b *testing.B, phases, taps, signalLen int) {
 	b.ResetTimer()
 	b.SetBytes(int64(signalLen * phases * 8))
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		ops.ConvolveValidMulti(dsts, signal, kernels)
 	}
 
@@ -136,7 +136,7 @@ func benchDotProduct(b *testing.B, size int) {
 	var sum float64
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		sum = ops.DotProductUnsafe(a, c)
 	}
 
@@ -169,7 +169,7 @@ func benchInterleave2(b *testing.B, size int) {
 	b.ResetTimer()
 	b.SetBytes(int64(size * 2 * 8))
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		ops.Interleave2(dst, a, c)
 	}
 
@@ -209,18 +209,16 @@ func benchDFTStage(b *testing.B, quality Quality) {
 
 	b.ResetTimer()
 
-	var totalSamples int64
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		stage.Reset()
 		output, err := stage.Process(input)
 		if err != nil {
 			b.Fatal(err)
 		}
-		totalSamples += int64(len(input))
 		_ = output
 	}
 
-	b.ReportMetric(float64(totalSamples)/b.Elapsed().Seconds()/1e6, "MS/s")
+	b.ReportMetric(float64(int64(b.N)*int64(len(input)))/b.Elapsed().Seconds()/1e6, "MS/s")
 }
 
 // BenchmarkFunc_PolyphaseStage benchmarks the polyphase resampling stage.
@@ -264,18 +262,16 @@ func benchPolyphaseStage(b *testing.B, quality Quality, ratio float64, isDownsam
 
 	b.ResetTimer()
 
-	var totalSamples int64
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		stage.Reset()
 		output, err := stage.Process(input)
 		if err != nil {
 			b.Fatal(err)
 		}
-		totalSamples += int64(len(input))
 		_ = output
 	}
 
-	b.ReportMetric(float64(totalSamples)/b.Elapsed().Seconds()/1e6, "MS/s")
+	b.ReportMetric(float64(int64(b.N)*int64(len(input)))/b.Elapsed().Seconds()/1e6, "MS/s")
 }
 
 // -----------------------------------------------------------------------------
@@ -324,7 +320,7 @@ func benchCubicInterpolation(b *testing.B, tapsPerPhase int) {
 	var sum float64
 	b.ResetTimer()
 
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		sum = 0
 		for tap := range tapsPerPhase {
 			// This is exactly the hot loop from PolyphaseStage.Process
@@ -368,7 +364,7 @@ func BenchmarkFunc_CubicInterpolation_64Taps_Unrolled4(b *testing.B) {
 	var sum float64
 	b.ResetTimer()
 
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		sum = 0
 		// Unrolled by 4
 		for tap := 0; tap < tapsPerPhase; tap += 4 {
@@ -440,18 +436,16 @@ func benchFullPipeline(b *testing.B, inputRate, outputRate float64, quality Qual
 
 	b.ResetTimer()
 
-	var totalSamples int64
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		resampler.Reset()
 		output, err := resampler.Process(input)
 		if err != nil {
 			b.Fatal(err)
 		}
-		totalSamples += int64(len(input))
 		_ = output
 	}
 
-	b.ReportMetric(float64(totalSamples)/b.Elapsed().Seconds()/1e6, "MS/s")
+	b.ReportMetric(float64(int64(b.N)*int64(len(input)))/b.Elapsed().Seconds()/1e6, "MS/s")
 }
 
 // -----------------------------------------------------------------------------

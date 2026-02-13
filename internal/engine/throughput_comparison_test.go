@@ -149,7 +149,7 @@ func measureGoThroughputReuse(inputRate, outputRate float64, quality Quality, nu
 }
 
 // getSoxrThroughput runs the soxr throughput test
-func getSoxrThroughput(inputRate, outputRate float64, quality string) (*ThroughputResult, error) {
+func getSoxrThroughput(ctx context.Context, inputRate, outputRate float64, quality string) (*ThroughputResult, error) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return nil, fmt.Errorf("failed to get current file path")
@@ -162,7 +162,7 @@ func getSoxrThroughput(inputRate, outputRate float64, quality string) (*Throughp
 		return nil, fmt.Errorf("soxr quality tool not found at %s", toolPath)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, toolPath,
@@ -239,7 +239,7 @@ func TestThroughput_AllQualityPresets(t *testing.T) {
 
 			for _, preset := range qualityPresets {
 				// Get SOXR throughput
-				soxrResult, err := getSoxrThroughput(tc.inputRate, tc.outputRate, preset.soxrQuality)
+				soxrResult, err := getSoxrThroughput(t.Context(), tc.inputRate, tc.outputRate, preset.soxrQuality)
 				if err != nil {
 					t.Logf("%-12s | %12s | %12s | %8s", preset.name, "N/A", "N/A", "N/A")
 					continue
@@ -280,7 +280,7 @@ func TestThroughput_DetailedComparison(t *testing.T) {
 	for _, preset := range qualityPresets {
 		t.Run(preset.name, func(t *testing.T) {
 			// Get SOXR throughput
-			soxrResult, err := getSoxrThroughput(inputRate, outputRate, preset.soxrQuality)
+			soxrResult, err := getSoxrThroughput(t.Context(), inputRate, outputRate, preset.soxrQuality)
 			if err != nil {
 				t.Skipf("soxr throughput not available: %v", err)
 			}
@@ -349,7 +349,7 @@ func TestThroughput_Summary(t *testing.T) {
 		row := summaryRow{quality: preset.name}
 
 		// Get SOXR throughput
-		if soxrResult, err := getSoxrThroughput(inputRate, outputRate, preset.soxrQuality); err == nil {
+		if soxrResult, err := getSoxrThroughput(t.Context(), inputRate, outputRate, preset.soxrQuality); err == nil {
 			row.soxrMS = soxrResult.MegasamplesPerSec
 		}
 
@@ -435,16 +435,14 @@ func benchmarkThroughput(b *testing.B, inputRate, outputRate float64, quality Qu
 	_, _ = resampler.Process(input)
 	resampler.Reset()
 
-	b.ResetTimer()
 	b.SetBytes(int64(numSamples * 8)) // 8 bytes per float64
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := resampler.Process(input)
 		if err != nil {
 			b.Fatalf("process failed: %v", err)
 		}
 	}
 
-	b.StopTimer()
 	b.ReportMetric(float64(numSamples*b.N)/b.Elapsed().Seconds()/1e6, "MS/s")
 }

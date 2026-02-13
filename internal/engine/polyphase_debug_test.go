@@ -31,7 +31,7 @@ func TestPolyphaseFilterResponse(t *testing.T) {
 
 	// Calculate total DC gain (sum of all phases)
 	var totalDC float64
-	for phase := 0; phase < stage.numPhases; phase++ {
+	for phase := range stage.numPhases {
 		for _, c := range stage.polyCoeffs[phase] {
 			totalDC += float64(c)
 		}
@@ -42,8 +42,8 @@ func TestPolyphaseFilterResponse(t *testing.T) {
 	// Prototype layout: coeffs[tap * numPhases + phase]
 	prototypeLen := stage.tapsPerPhase * stage.numPhases
 	prototype := make([]float64, prototypeLen)
-	for phase := 0; phase < stage.numPhases; phase++ {
-		for tap := 0; tap < stage.tapsPerPhase; tap++ {
+	for phase := range stage.numPhases {
+		for tap := range stage.tapsPerPhase {
 			prototype[tap*stage.numPhases+phase] = float64(stage.polyCoeffs[phase][tap])
 		}
 	}

@@ -23,7 +23,7 @@ func TestAnalyzeHalfbandStructure(t *testing.T) {
 
 	// Count near-zero coefficients
 	const threshold = 1e-10
-	for phase := 0; phase < stage.factor; phase++ {
+	for phase := range stage.factor {
 		coeffs := stage.polyCoeffs[phase]
 		zeroCount := 0
 		nonZeroSum := 0.0
@@ -42,7 +42,7 @@ func TestAnalyzeHalfbandStructure(t *testing.T) {
 	// Check if this is a true half-band structure
 	// In a perfect half-band, every other tap (except center) would be zero
 	t.Log("\nSample coefficients (first 10):")
-	for phase := 0; phase < stage.factor; phase++ {
+	for phase := range stage.factor {
 		var coeffStr strings.Builder
 		coeffStr.WriteString(fmt.Sprintf("Phase %d: ", phase))
 		for i := 0; i < 10 && i < len(stage.polyCoeffs[phase]); i++ {

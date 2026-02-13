@@ -46,10 +46,9 @@ func benchmarkProcessMulti(b *testing.B, parallel bool) {
 		}
 	}
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := resampler.ProcessMulti(input)
 		if err != nil {
 			b.Fatalf("ProcessMulti failed: %v", err)
@@ -92,10 +91,9 @@ func BenchmarkProcessMultiChannels(b *testing.B) {
 				}
 			}
 
-			b.ResetTimer()
 			b.ReportAllocs()
 
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_, err := resampler.ProcessMulti(input)
 				if err != nil {
 					b.Fatalf("ProcessMulti failed: %v", err)

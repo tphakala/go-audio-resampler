@@ -38,7 +38,7 @@ const (
 )
 
 // getSoxrReference runs the soxr reference tool and returns output samples
-func getSoxrReference(inputRate, outputRate float64, signalType string, frequency float64) ([]float64, error) {
+func getSoxrReference(ctx context.Context, inputRate, outputRate float64, signalType string, frequency float64) ([]float64, error) {
 	args := []string{
 		fmt.Sprintf("%.0f", inputRate),
 		fmt.Sprintf("%.0f", outputRate),
@@ -48,7 +48,7 @@ func getSoxrReference(inputRate, outputRate float64, signalType string, frequenc
 		args = append(args, fmt.Sprintf("%.0f", frequency))
 	}
 
-	cmd := exec.CommandContext(context.Background(), soxrRefPath, args...)
+	cmd := exec.CommandContext(ctx, soxrRefPath, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("soxr reference failed: %w", err)
@@ -201,7 +201,7 @@ func compareOutputs(got, want []float64) (maxErr, rmsErr, correlation float64, e
 	sumGotSq := 0.0
 	sumWantSq := 0.0
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		g := got[startGot+i]
 		w := want[startWant+i]
 		err := math.Abs(g - w)
@@ -249,7 +249,7 @@ func TestSoxrComparison_DC(t *testing.T) {
 		name := fmt.Sprintf("%.0f_to_%.0f", tc.inputRate, tc.outputRate)
 		t.Run(name, func(t *testing.T) {
 			// Get soxr reference
-			soxrOut, err := getSoxrReference(tc.inputRate, tc.outputRate, "dc", 0)
+			soxrOut, err := getSoxrReference(t.Context(), tc.inputRate, tc.outputRate, "dc", 0)
 			if err != nil {
 				t.Skipf("soxr reference not available: %v", err)
 			}
@@ -300,7 +300,7 @@ func TestSoxrComparison_Sine(t *testing.T) {
 		name := fmt.Sprintf("%.0fHz_%.0f_to_%.0f", tc.frequency, tc.inputRate, tc.outputRate)
 		t.Run(name, func(t *testing.T) {
 			// Get soxr reference
-			soxrOut, err := getSoxrReference(tc.inputRate, tc.outputRate, "sine", tc.frequency)
+			soxrOut, err := getSoxrReference(t.Context(), tc.inputRate, tc.outputRate, "sine", tc.frequency)
 			if err != nil {
 				t.Skipf("soxr reference not available: %v", err)
 			}
@@ -361,7 +361,7 @@ func TestSoxrComparison_Impulse(t *testing.T) {
 		name := fmt.Sprintf("%.0f_to_%.0f", tc.inputRate, tc.outputRate)
 		t.Run(name, func(t *testing.T) {
 			// Get soxr reference
-			soxrOut, err := getSoxrReference(tc.inputRate, tc.outputRate, "impulse", 0)
+			soxrOut, err := getSoxrReference(t.Context(), tc.inputRate, tc.outputRate, "impulse", 0)
 			if err != nil {
 				t.Skipf("soxr reference not available: %v", err)
 			}

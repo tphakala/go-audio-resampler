@@ -70,7 +70,7 @@ func (b *RingBuffer) Read(n int) []float64 {
 	result := make([]float64, n)
 
 	// Read samples (may wrap around)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		result[i] = b.data[b.readPos]
 		b.readPos = (b.readPos + 1) % b.capacity
 		b.size--
@@ -95,9 +95,13 @@ func (b *RingBuffer) Peek(n int) []float64 {
 	readPos := b.readPos
 
 	// Copy samples without modifying buffer state
-	for i := 0; i < n; i++ {
-		result[i] = b.data[readPos]
-		readPos = (readPos + 1) % b.capacity
+	firstReadLen := n
+	if readPos+n > b.capacity {
+		firstReadLen = b.capacity - readPos
+	}
+	copy(result, b.data[readPos:readPos+firstReadLen])
+	if firstReadLen < n {
+		copy(result[firstReadLen:], b.data[0:n-firstReadLen])
 	}
 
 	return result
@@ -226,7 +230,7 @@ func (f *FIFOBuffer) Read(n int) []float64 {
 
 	result := make([]float64, n)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		result[i] = f.data[f.readPos&uint32(f.mask)]
 		f.readPos++
 		f.size--
@@ -241,8 +245,15 @@ func (f *FIFOBuffer) grow() {
 	newData := make([]float64, newCap)
 
 	// Copy existing data
-	for i := 0; i < f.size; i++ {
-		newData[i] = f.data[(f.readPos+uint32(i))&uint32(f.mask)]
+	readPos := f.readPos & uint32(f.mask)
+	if int(readPos)+f.size <= len(f.data) {
+		// Data is contiguous
+		copy(newData, f.data[readPos:int(readPos)+f.size])
+	} else {
+		// Data wraps around
+		firstCopyLen := len(f.data) - int(readPos)
+		copy(newData, f.data[readPos:])
+		copy(newData[firstCopyLen:], f.data[0:f.size-firstCopyLen])
 	}
 
 	f.data = newData

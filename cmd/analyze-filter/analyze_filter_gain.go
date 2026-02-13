@@ -53,9 +53,9 @@ func main() {
 	phasesToShow := []int{0, 1, 2, 3, 4, 5, 6, 7, 31, 32, 33}
 	phaseGains := make(map[int]float64)
 
-	for phase := 0; phase < pfb.NumPhases; phase++ {
+	for phase := range pfb.NumPhases {
 		var phaseDC float64
-		for tap := 0; tap < pfb.TapsPerPhase; tap++ {
+		for tap := range pfb.TapsPerPhase {
 			coef := pfb.GetCoefficient(tap, phase, 0.0)
 			phaseDC += coef
 		}
