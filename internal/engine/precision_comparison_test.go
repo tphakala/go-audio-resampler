@@ -340,18 +340,16 @@ func benchPrecision[F float32 | float64](b *testing.B, inputRate, outputRate flo
 
 	b.ResetTimer()
 
-	var totalSamples int64
 	for b.Loop() {
 		resampler.Reset()
 		output, err := resampler.Process(input)
 		if err != nil {
 			b.Fatal(err)
 		}
-		totalSamples += int64(len(input))
 		_ = output
 	}
 
-	b.ReportMetric(float64(totalSamples)/b.Elapsed().Seconds()/1e6, "MS/s")
+	b.ReportMetric(float64(int64(b.N)*int64(len(input)))/b.Elapsed().Seconds()/1e6, "MS/s")
 }
 
 // -----------------------------------------------------------------------------
@@ -391,18 +389,16 @@ func benchPolyphasePrecision[F float32 | float64](b *testing.B, quality Quality,
 
 	b.ResetTimer()
 
-	var totalSamples int64
 	for b.Loop() {
 		stage.Reset()
 		output, err := stage.Process(input)
 		if err != nil {
 			b.Fatal(err)
 		}
-		totalSamples += int64(len(input))
 		_ = output
 	}
 
-	b.ReportMetric(float64(totalSamples)/b.Elapsed().Seconds()/1e6, "MS/s")
+	b.ReportMetric(float64(int64(b.N)*int64(len(input)))/b.Elapsed().Seconds()/1e6, "MS/s")
 }
 
 func benchDFTPrecision[F float32 | float64](b *testing.B, quality Quality) {
@@ -421,18 +417,16 @@ func benchDFTPrecision[F float32 | float64](b *testing.B, quality Quality) {
 
 	b.ResetTimer()
 
-	var totalSamples int64
 	for b.Loop() {
 		stage.Reset()
 		output, err := stage.Process(input)
 		if err != nil {
 			b.Fatal(err)
 		}
-		totalSamples += int64(len(input))
 		_ = output
 	}
 
-	b.ReportMetric(float64(totalSamples)/b.Elapsed().Seconds()/1e6, "MS/s")
+	b.ReportMetric(float64(int64(b.N)*int64(len(input)))/b.Elapsed().Seconds()/1e6, "MS/s")
 }
 
 // -----------------------------------------------------------------------------

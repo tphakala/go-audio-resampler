@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // =============================================================================
@@ -930,7 +931,7 @@ func runSoxrQualityTest(ctx context.Context, inputRate, outputRate float64, test
 		return nil, fmt.Errorf("soxr quality tool not found at %s (run 'make test_quality' in test-reference/)", toolPath)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 30*1000*1000*1000) // 30 seconds
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, toolPath,

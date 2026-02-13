@@ -209,18 +209,16 @@ func benchDFTStage(b *testing.B, quality Quality) {
 
 	b.ResetTimer()
 
-	var totalSamples int64
 	for b.Loop() {
 		stage.Reset()
 		output, err := stage.Process(input)
 		if err != nil {
 			b.Fatal(err)
 		}
-		totalSamples += int64(len(input))
 		_ = output
 	}
 
-	b.ReportMetric(float64(totalSamples)/b.Elapsed().Seconds()/1e6, "MS/s")
+	b.ReportMetric(float64(int64(b.N)*int64(len(input)))/b.Elapsed().Seconds()/1e6, "MS/s")
 }
 
 // BenchmarkFunc_PolyphaseStage benchmarks the polyphase resampling stage.
@@ -264,18 +262,16 @@ func benchPolyphaseStage(b *testing.B, quality Quality, ratio float64, isDownsam
 
 	b.ResetTimer()
 
-	var totalSamples int64
 	for b.Loop() {
 		stage.Reset()
 		output, err := stage.Process(input)
 		if err != nil {
 			b.Fatal(err)
 		}
-		totalSamples += int64(len(input))
 		_ = output
 	}
 
-	b.ReportMetric(float64(totalSamples)/b.Elapsed().Seconds()/1e6, "MS/s")
+	b.ReportMetric(float64(int64(b.N)*int64(len(input)))/b.Elapsed().Seconds()/1e6, "MS/s")
 }
 
 // -----------------------------------------------------------------------------
@@ -440,18 +436,16 @@ func benchFullPipeline(b *testing.B, inputRate, outputRate float64, quality Qual
 
 	b.ResetTimer()
 
-	var totalSamples int64
 	for b.Loop() {
 		resampler.Reset()
 		output, err := resampler.Process(input)
 		if err != nil {
 			b.Fatal(err)
 		}
-		totalSamples += int64(len(input))
 		_ = output
 	}
 
-	b.ReportMetric(float64(totalSamples)/b.Elapsed().Seconds()/1e6, "MS/s")
+	b.ReportMetric(float64(int64(b.N)*int64(len(input)))/b.Elapsed().Seconds()/1e6, "MS/s")
 }
 
 // -----------------------------------------------------------------------------

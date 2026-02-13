@@ -46,7 +46,6 @@ func benchmarkProcessMulti(b *testing.B, parallel bool) {
 		}
 	}
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
@@ -92,7 +91,6 @@ func BenchmarkProcessMultiChannels(b *testing.B) {
 				}
 			}
 
-			b.ResetTimer()
 			b.ReportAllocs()
 
 			for b.Loop() {

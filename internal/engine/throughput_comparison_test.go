@@ -435,7 +435,6 @@ func benchmarkThroughput(b *testing.B, inputRate, outputRate float64, quality Qu
 	_, _ = resampler.Process(input)
 	resampler.Reset()
 
-	b.ResetTimer()
 	b.SetBytes(int64(numSamples * 8)) // 8 bytes per float64
 
 	for b.Loop() {
@@ -445,6 +444,5 @@ func benchmarkThroughput(b *testing.B, inputRate, outputRate float64, quality Qu
 		}
 	}
 
-	b.StopTimer()
 	b.ReportMetric(float64(numSamples*b.N)/b.Elapsed().Seconds()/1e6, "MS/s")
 }
