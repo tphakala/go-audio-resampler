@@ -28,8 +28,9 @@ const (
 	regressionAmplitudeTolerance = 0.05 // 5%
 
 	// Maximum passband ripple in dB (peak-to-peak)
-	// Calibrated: actual performance is ~1.3 dB for fractional ratios
-	regressionMaxRippleQuick    = 2.0 // Quick quality
+	// Calibrated: actual performance is ~1.3 dB for fractional ratios (polyphase)
+	//             Quick quality uses cubic interpolation: ~5.1 dB (matches SOXR)
+	regressionMaxRippleQuick    = 5.5 // Quick quality (cubic interpolation)
 	regressionMaxRippleLow      = 2.0 // Low quality
 	regressionMaxRippleMedium   = 2.0 // Medium quality
 	regressionMaxRippleHigh     = 2.0 // High quality

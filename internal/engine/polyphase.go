@@ -29,6 +29,7 @@ type Resampler[F simdops.Float] struct {
 	ratio      float64 // outputRate / inputRate
 
 	// Stages
+	cubicStage      *CubicStage[F]         // Optional cubic interpolation stage (for QualityQuick)
 	preStage        *DFTStage[F]           // Optional pre-upsampling stage
 	decimationStage *DFTDecimationStage[F] // Optional decimation stage (for integer downsampling)
 	polyphaseStage  *PolyphaseStage[F]     // Main polyphase resampling stage
@@ -52,6 +53,16 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 	}
 
 	ratio := outputRate / inputRate
+
+	// Validate ratio bounds to prevent memory exhaustion and integer overflow.
+	// Following SOXR's pattern: ratios between 1/256 and 256 are practical for audio.
+	// Extreme ratios can cause: (1) integer overflow in output size calculation,
+	// (2) memory exhaustion from attempting to allocate huge output buffers.
+	const minRatio = 1.0 / 256.0  // 256x downsampling
+	const maxRatio = 256.0         // 256x upsampling
+	if ratio < minRatio || ratio > maxRatio {
+		return nil, fmt.Errorf("resampling ratio %.6f out of valid range [%.6f, %.0f]", ratio, minRatio, maxRatio)
+	}
 	ops := simdops.For[F]()
 
 	r := &Resampler[F]{
@@ -59,6 +70,13 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 		outputRate: outputRate,
 		ratio:      ratio,
 		ops:        ops,
+	}
+
+	// QualityQuick uses cubic interpolation (matching SOXR_QQ)
+	if quality == QualityQuick {
+		cubicStage := NewCubicStage[F](ratio)
+		r.cubicStage = cubicStage
+		return r, nil
 	}
 
 	// Determine architecture based on ratio
@@ -167,6 +185,16 @@ func (r *Resampler[F]) Process(input []F) ([]F, error) {
 
 	r.samplesIn += int64(len(input))
 
+	// QualityQuick uses cubic interpolation only
+	if r.cubicStage != nil {
+		output, err := r.cubicStage.Process(input)
+		if err != nil {
+			return nil, fmt.Errorf("cubic stage processing failed: %w", err)
+		}
+		r.samplesOut += int64(len(output))
+		return output, nil
+	}
+
 	// Stage 1: Pre-stage (DFT upsampling) - for upsampling only
 	intermediate := input
 	var err error
@@ -199,6 +227,11 @@ func (r *Resampler[F]) Process(input []F) ([]F, error) {
 
 // Flush returns any remaining buffered samples.
 func (r *Resampler[F]) Flush() ([]F, error) {
+	// QualityQuick cubic stage doesn't buffer
+	if r.cubicStage != nil {
+		return r.cubicStage.Flush()
+	}
+
 	var output []F
 	var err error
 
@@ -244,6 +277,9 @@ func (r *Resampler[F]) Flush() ([]F, error) {
 
 // Reset clears internal state.
 func (r *Resampler[F]) Reset() {
+	if r.cubicStage != nil {
+		r.cubicStage.Reset()
+	}
 	if r.preStage != nil {
 		r.preStage.Reset()
 	}

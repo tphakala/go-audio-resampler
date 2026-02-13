@@ -74,7 +74,7 @@ func TestResampler_EmptyInput(t *testing.T) {
 
 // TestCubicStage_EmptyInput verifies CubicStage handles empty input correctly.
 func TestCubicStage_EmptyInput(t *testing.T) {
-	stage := NewCubicStage(2.0)
+	stage := NewCubicStage[float64](2.0)
 
 	output, err := stage.Process([]float64{})
 	require.NoError(t, err, "Process() with empty input should not error")
@@ -499,11 +499,16 @@ func TestNewResampler_InvalidRates(t *testing.T) {
 		wantErr    bool
 	}{
 		{"valid_rates", 44100, 48000, false},
+		{"valid_max_ratio", 1000, 256000, false},      // ratio = 256 (max)
+		{"valid_min_ratio", 256000, 1000, false},      // ratio = 1/256 (min)
 		{"zero_input", 0, 48000, true},
 		{"zero_output", 44100, 0, true},
 		{"negative_input", -44100, 48000, true},
 		{"negative_output", 44100, -48000, true},
 		{"both_zero", 0, 0, true},
+		{"ratio_too_large", 1000, 300000, true},       // ratio = 300 (> 256)
+		{"ratio_too_small", 300000, 1000, true},       // ratio = 1/300 (< 1/256)
+		{"extreme_ratio", 1000, 1e9, true},            // ratio = 1e6 (way too large)
 	}
 
 	for _, tc := range testCases {

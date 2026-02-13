@@ -156,8 +156,8 @@ func TestInterpolationStages_Reset(t *testing.T) {
 	}{
 		{
 			name:     "CubicStage",
-			newStage: func() interpolationStage { return NewCubicStage(2.0) },
-			newFresh: func() interpolationStage { return NewCubicStage(2.0) },
+			newStage: func() interpolationStage { return NewCubicStage[float64](2.0) },
+			newFresh: func() interpolationStage { return NewCubicStage[float64](2.0) },
 		},
 		{
 			name:     "LinearStage",
