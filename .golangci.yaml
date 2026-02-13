@@ -65,6 +65,9 @@ linters:
         - style
         - diagnostic
         - performance
+      settings:
+        ruleguard:
+          rules: "${config-path}/rules/*.go"
     revive:
       rules:
         - name: unused-parameter
