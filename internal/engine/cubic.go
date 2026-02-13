@@ -3,21 +3,23 @@ package engine
 
 import (
 	"math"
+
+	"github.com/tphakala/go-audio-resampler/internal/simdops"
 )
 
-// CubicStage implements cubic (4-point, 3rd order) Hermite interpolation.
-// This is the fastest but lowest quality resampling method.
-type CubicStage struct {
+// CubicStage implements cubic (4-point, 3rd order) interpolation matching SOXR.
+// This is the fastest resampling method, used for QualityQuick preset.
+type CubicStage[F simdops.Float] struct {
 	ratio   float64
 	phase   float64
-	history [4]float64 // 4-point window for interpolation
+	history [4]F // 4-point window for interpolation
 	histPos int
 	latency int
 }
 
 // NewCubicStage creates a new cubic interpolation stage.
-func NewCubicStage(ratio float64) *CubicStage {
-	return &CubicStage{
+func NewCubicStage[F simdops.Float](ratio float64) *CubicStage[F] {
+	return &CubicStage[F]{
 		ratio:   ratio,
 		phase:   0,
 		latency: cubicLatencySamples,
@@ -25,14 +27,14 @@ func NewCubicStage(ratio float64) *CubicStage {
 }
 
 // Process resamples input using cubic interpolation.
-func (c *CubicStage) Process(input []float64) ([]float64, error) {
+func (c *CubicStage[F]) Process(input []F) ([]F, error) {
 	if len(input) == 0 {
-		return []float64{}, nil
+		return []F{}, nil
 	}
 
 	// Estimate output size
 	outputSize := int(math.Ceil(float64(len(input)) * c.ratio))
-	output := make([]float64, 0, outputSize)
+	output := make([]F, 0, outputSize)
 
 	for _, sample := range input {
 		// Shift history window
@@ -43,7 +45,7 @@ func (c *CubicStage) Process(input []float64) ([]float64, error) {
 
 		// Generate output samples
 		for c.phase < 1.0 {
-			// Cubic Hermite interpolation
+			// Cubic interpolation matching SOXR
 			y := c.interpolate(c.phase)
 			output = append(output, y)
 
@@ -58,71 +60,75 @@ func (c *CubicStage) Process(input []float64) ([]float64, error) {
 	return output, nil
 }
 
-// interpolate performs cubic Hermite interpolation.
-// Uses the formula: y = ((a*x + b)*x + c)*x + d
+// interpolate performs cubic interpolation matching SOXR's implementation.
+// Uses the formula: y = ((a*x + b)*x + coefC)*x + s[0]
 // where x is the fractional position between samples.
-func (c *CubicStage) interpolate(x float64) float64 {
+//
+// SOXR formula from cr-core.c:59-61:
+//   b = 0.5*(s[1]+s[-1]) - s[0]
+//   a = (1/6)*(s[2]-s[1]+s[-1]-s[0] - 4*b)
+//   coefC = s[1] - s[0] - a - b
+func (c *CubicStage[F]) interpolate(x float64) F {
 	// Get the 4 points for interpolation
-	y0 := c.history[3] // oldest
-	y1 := c.history[2]
-	y2 := c.history[1]
-	y3 := c.history[0] // newest
+	// Map to SOXR's convention: s[-1], s[0], s[1], s[2]
+	sMinus1 := float64(c.history[3]) // oldest  = s[-1]
+	s0 := float64(c.history[2])      // center  = s[0]
+	s1 := float64(c.history[1])      // next    = s[1]
+	s2 := float64(c.history[0])      // newest  = s[2]
 
-	// Hermite basis functions
-	// These coefficients provide smooth interpolation with continuous first derivative
-	coefA := -hermiteCoeff0_5*y0 + hermiteCoeff1_5*y1 - hermiteCoeff1_5*y2 + hermiteCoeff0_5*y3
-	coefB := y0 - hermiteCoeff2_5*y1 + 2*y2 - hermiteCoeff0_5*y3
-	coefC := -hermiteCoeff0_5*y0 + hermiteCoeff0_5*y2
-	coefD := y1
+	// SOXR's cubic formula (from cr-core.c:59-61)
+	b := 0.5*(s1+sMinus1) - s0
+	a := (1.0 / 6.0) * (s2 - s1 + sMinus1 - s0 - 4*b)
+	coefC := s1 - s0 - a - b
 
-	// Evaluate polynomial
-	return ((coefA*x+coefB)*x+coefC)*x + coefD
+	// Evaluate polynomial: (((a*x + b)*x + coefC)*x + s[0])
+	return F(((a*x+b)*x+coefC)*x + s0)
 }
 
 // Flush returns any remaining samples.
-func (c *CubicStage) Flush() ([]float64, error) {
+func (c *CubicStage[F]) Flush() ([]F, error) {
 	// Cubic interpolation doesn't buffer samples
-	return []float64{}, nil
+	return []F{}, nil
 }
 
 // Reset clears internal state.
-func (c *CubicStage) Reset() {
+func (c *CubicStage[F]) Reset() {
 	c.phase = 0
-	c.history = [4]float64{}
+	c.history = [4]F{}
 }
 
 // GetRatio returns the stage's resampling ratio.
-func (c *CubicStage) GetRatio() float64 {
+func (c *CubicStage[F]) GetRatio() float64 {
 	return c.ratio
 }
 
 // GetLatency returns the stage latency in samples.
-func (c *CubicStage) GetLatency() int {
+func (c *CubicStage[F]) GetLatency() int {
 	return c.latency
 }
 
 // GetMinInput returns the minimum input size for processing.
-func (c *CubicStage) GetMinInput() int {
+func (c *CubicStage[F]) GetMinInput() int {
 	return 1 // Can process sample by sample
 }
 
 // GetMemoryUsage returns approximate memory usage in bytes.
-func (c *CubicStage) GetMemoryUsage() int64 {
+func (c *CubicStage[F]) GetMemoryUsage() int64 {
 	return cubicMemoryUsage
 }
 
 // GetFilterLength returns 0 as cubic doesn't use a filter.
-func (c *CubicStage) GetFilterLength() int {
+func (c *CubicStage[F]) GetFilterLength() int {
 	return cubicInterpolationPoints
 }
 
 // GetPhases returns 0 as cubic doesn't use phases.
-func (c *CubicStage) GetPhases() int {
+func (c *CubicStage[F]) GetPhases() int {
 	return 0
 }
 
 // GetSIMDInfo returns empty as cubic doesn't use SIMD.
-func (c *CubicStage) GetSIMDInfo() string {
+func (c *CubicStage[F]) GetSIMDInfo() string {
 	return ""
 }
 

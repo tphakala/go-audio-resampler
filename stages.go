@@ -16,7 +16,7 @@ const (
 
 // newCubicStage creates a cubic interpolation stage.
 func newCubicStage(ratio float64) pipeline.Stage {
-	return engine.NewCubicStage(ratio)
+	return engine.NewCubicStage[float64](ratio)
 }
 
 // newHalfBandStage creates a half-band decimation/interpolation stage.
@@ -180,7 +180,7 @@ func (s *stubStage) GetSIMDInfo() string {
 
 // Ensure implementations satisfy the interface
 var (
-	_ pipeline.Stage = (*engine.CubicStage)(nil)
+	_ pipeline.Stage = (*engine.CubicStage[float64])(nil)
 	_ pipeline.Stage = (*engine.StageAdapter[float64])(nil)
 	_ pipeline.Stage = (*stubStage)(nil)
 )

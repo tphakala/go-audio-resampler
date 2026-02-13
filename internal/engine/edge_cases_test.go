@@ -74,7 +74,7 @@ func TestResampler_EmptyInput(t *testing.T) {
 
 // TestCubicStage_EmptyInput verifies CubicStage handles empty input correctly.
 func TestCubicStage_EmptyInput(t *testing.T) {
-	stage := NewCubicStage(2.0)
+	stage := NewCubicStage[float64](2.0)
 
 	output, err := stage.Process([]float64{})
 	require.NoError(t, err, "Process() with empty input should not error")

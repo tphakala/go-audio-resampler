@@ -360,7 +360,7 @@ func TestPolyphaseStage_MultipleProcessCalls(t *testing.T) {
 
 // TestCubicStage_BufferIntegrity verifies CubicStage doesn't have buffer issues.
 func TestCubicStage_BufferIntegrity(t *testing.T) {
-	stage := NewCubicStage(2.0)
+	stage := NewCubicStage[float64](2.0)
 
 	// Generate test signal
 	input := make([]float64, 1000)
