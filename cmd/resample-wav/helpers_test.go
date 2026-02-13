@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-audio/audio"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tphakala/go-audio-resampler/internal/engine"
@@ -93,11 +94,15 @@ func TestCreateWAVOutput_Success(t *testing.T) {
 }
 
 func TestNewResampleBuffers(t *testing.T) {
+	format := &audio.Format{
+		SampleRate:  44100,
+		NumChannels: 2,
+	}
 	buffers := newResampleBuffers[float64](
 		2,           // stereo
 		16,          // 16-bit
 		44100, 48000, // rates
-		nil, // format (can be nil for this test)
+		format,
 	)
 
 	require.NotNil(t, buffers)
@@ -149,7 +154,7 @@ func TestResampleSequential_Success(t *testing.T) {
 		make([]float64, numSamples),
 		make([]float64, numSamples),
 	}
-	// Fill with test sine wave
+	// Fill with test data (constant signal)
 	for i := range numSamples {
 		channelBufs[0][i] = 0.5
 		channelBufs[1][i] = -0.5
@@ -179,7 +184,7 @@ func TestResampleParallel_Success(t *testing.T) {
 		make([]float64, numSamples),
 		make([]float64, numSamples),
 	}
-	// Fill with test sine wave
+	// Fill with test data (constant signal)
 	for i := range numSamples {
 		channelBufs[0][i] = 0.5
 		channelBufs[1][i] = -0.5

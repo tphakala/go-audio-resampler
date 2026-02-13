@@ -11,7 +11,7 @@
 
 The function performs these logical operations (209 lines):
 
-```
+```text
 resampleWAVGeneric[F Float]
 ├─ 1. Input file opening & validation (lines 218-244)
 │  ├─ Open file

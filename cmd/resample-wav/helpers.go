@@ -123,11 +123,18 @@ func (w *wavOutputWriter) WriteSamples(samples []int) error {
 }
 
 // Close closes the output writer and file.
+// Both Close() calls are always executed to prevent resource leaks.
 func (w *wavOutputWriter) Close() error {
-	if err := w.writer.Close(); err != nil {
-		return err
+	writerErr := w.writer.Close()
+	fileErr := w.file.Close()
+
+	if writerErr != nil {
+		if fileErr != nil {
+			return fmt.Errorf("writer close: %w; file close: %w", writerErr, fileErr)
+		}
+		return writerErr
 	}
-	return w.file.Close()
+	return fileErr
 }
 
 // resampleBuffers holds all preallocated buffers for resampling.
@@ -201,6 +208,8 @@ func (p *progressTracker) reportIfNeeded(currentSamples int64) {
 	}
 
 	progress := int(float64(currentSamples) / float64(p.totalSamples) * percentScale)
+	// Clamp to percentScale to prevent >100% when totalSamples is an underestimate
+	progress = min(progress, percentScale)
 	if progress >= p.lastProgress+progressInterval {
 		log.Printf("Progress: %d%%", progress)
 		p.lastProgress = progress
@@ -244,6 +253,7 @@ func resampleParallel[F Float](
 			resampled, err := resamplers[channel].Process(channelBufs[channel][:numSamples])
 			if err != nil {
 				errMu.Lock()
+				// Capture only first error (subsequent errors are dropped)
 				if processErr == nil {
 					processErr = fmt.Errorf("resampling failed on channel %d: %w", channel, err)
 				}
