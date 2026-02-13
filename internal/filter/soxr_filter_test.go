@@ -78,7 +78,7 @@ func TestFilterCoefficients_Symmetry(t *testing.T) {
 			require.NoError(t, err)
 
 			n := len(filter)
-			for i := 0; i < n/2; i++ {
+			for i := range n / 2 {
 				assert.InDelta(t, filter[i], filter[n-1-i], 1e-12,
 					"filter not symmetric at index %d: h[%d]=%v != h[%d]=%v",
 					i, i, filter[i], n-1-i, filter[n-1-i])

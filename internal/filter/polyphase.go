@@ -353,14 +353,14 @@ func (pfb *PolyphaseFilterBank) ComputeFrequencyResponse(numPoints int) FilterRe
 	phase0Coeffs := make([]float64, pfb.TapsPerPhase)
 	coeffsPerTap := int(pfb.InterpOrder) + 1
 
-	for tap := 0; tap < pfb.TapsPerPhase; tap++ {
+	for tap := range pfb.TapsPerPhase {
 		baseIdx := (tap*pfb.NumPhases + 0) * coeffsPerTap
 		phase0Coeffs[tap] = pfb.Coeffs[baseIdx]
 	}
 
 	// Compute DTFT of phase 0
 	const twoPi = 2.0 * math.Pi
-	for k := 0; k < numPoints; k++ {
+	for k := range numPoints {
 		freq := float64(k) / float64(frequencyNyquistDivisor*numPoints)
 		response.Frequencies[k] = freq
 

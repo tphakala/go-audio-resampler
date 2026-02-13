@@ -71,7 +71,8 @@ func main() {
 
 	// Process in chunks (simulating streaming)
 	chunkSize := 4096
-	var output3 []float64
+	estimatedOutput := int(float64(len(input)) * outputRate / inputRate)
+	output3 := make([]float64, 0, estimatedOutput)
 	for i := 0; i < len(input); i += chunkSize {
 		end := min(i+chunkSize, len(input))
 		chunk := input[i:end]

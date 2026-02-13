@@ -23,7 +23,7 @@ const halfDivisor = 2
 func AssertSymmetric(t *testing.T, s []float64, tolerance float64, msgAndArgs ...any) bool {
 	t.Helper()
 	n := len(s)
-	for i := 0; i < n/2; i++ {
+	for i := range n / 2 {
 		j := n - 1 - i
 		if !assert.InDelta(t, s[i], s[j], tolerance,
 			"slice not symmetric at i=%d: s[%d]=%f != s[%d]=%f", i, i, s[i], j, s[j]) {

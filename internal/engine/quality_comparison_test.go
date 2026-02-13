@@ -200,7 +200,7 @@ func TestPassbandRipple_CompareWithSoxr(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Get soxr reference
-			soxrResult, err := getSoxrPassbandRipple(tc.inputRate, tc.outputRate)
+			soxrResult, err := getSoxrPassbandRipple(t.Context(), tc.inputRate, tc.outputRate)
 			if err != nil {
 				t.Skipf("soxr reference not available: %v", err)
 			}
@@ -364,7 +364,7 @@ func TestTHD_CompareWithSoxr(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Get soxr reference
-			soxrResult, err := getSoxrTHD(tc.inputRate, tc.outputRate, tc.testFreq)
+			soxrResult, err := getSoxrTHD(t.Context(), tc.inputRate, tc.outputRate, tc.testFreq)
 			if err != nil {
 				t.Skipf("soxr reference not available: %v", err)
 			}
@@ -523,7 +523,7 @@ func TestSNR_CompareWithSoxr(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Get soxr reference
-			soxrResult, err := getSoxrSNR(tc.inputRate, tc.outputRate, testFreq)
+			soxrResult, err := getSoxrSNR(t.Context(), tc.inputRate, tc.outputRate, testFreq)
 			if err != nil {
 				t.Skipf("soxr reference not available: %v", err)
 			}
@@ -606,7 +606,7 @@ func measureImpulseResponse(inputRate, outputRate float64, quality Quality) (*Im
 
 	// Measure pre-ringing (peak before main impulse)
 	preRingingPeak := 0.0
-	for i := 0; i < mainPeakIdx; i++ {
+	for i := range mainPeakIdx {
 		if math.Abs(output[i]) > preRingingPeak {
 			preRingingPeak = math.Abs(output[i])
 		}
@@ -660,7 +660,7 @@ func TestImpulseResponse_CompareWithSoxr(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Get soxr reference
-			soxrResult, err := getSoxrImpulse(tc.inputRate, tc.outputRate)
+			soxrResult, err := getSoxrImpulse(t.Context(), tc.inputRate, tc.outputRate)
 			if err != nil {
 				t.Skipf("soxr reference not available: %v", err)
 			}
@@ -777,7 +777,7 @@ func TestRationalRatio_Quality(t *testing.T) {
 // SOXR Reference Functions (try static data first, then C tool)
 // =============================================================================
 
-func getSoxrPassbandRipple(inputRate, outputRate float64) (*PassbandRippleResult, error) {
+func getSoxrPassbandRipple(ctx context.Context, inputRate, outputRate float64) (*PassbandRippleResult, error) {
 	// Try static data first
 	if refData, err := loadStaticReferenceData(); err == nil {
 		key := fmt.Sprintf("ripple_%.0f_%.0f", inputRate, outputRate)
@@ -800,7 +800,7 @@ func getSoxrPassbandRipple(inputRate, outputRate float64) (*PassbandRippleResult
 	}
 
 	// Fall back to C tool
-	result, err := runSoxrQualityTest(inputRate, outputRate, "ripple")
+	result, err := runSoxrQualityTest(ctx, inputRate, outputRate, "ripple")
 	if err != nil {
 		return nil, err
 	}
@@ -814,7 +814,7 @@ func getSoxrPassbandRipple(inputRate, outputRate float64) (*PassbandRippleResult
 	}, nil
 }
 
-func getSoxrTHD(inputRate, outputRate, testFreq float64) (*THDResult, error) {
+func getSoxrTHD(ctx context.Context, inputRate, outputRate, testFreq float64) (*THDResult, error) {
 	// Try static data first
 	if refData, err := loadStaticReferenceData(); err == nil {
 		key := fmt.Sprintf("thd_%.0f_%.0f_%.0f", inputRate, outputRate, testFreq)
@@ -836,7 +836,7 @@ func getSoxrTHD(inputRate, outputRate, testFreq float64) (*THDResult, error) {
 	}
 
 	// Fall back to C tool
-	result, err := runSoxrQualityTest(inputRate, outputRate, fmt.Sprintf("thd:%.0f", testFreq))
+	result, err := runSoxrQualityTest(ctx, inputRate, outputRate, fmt.Sprintf("thd:%.0f", testFreq))
 	if err != nil {
 		return nil, err
 	}
@@ -850,7 +850,7 @@ func getSoxrTHD(inputRate, outputRate, testFreq float64) (*THDResult, error) {
 	}, nil
 }
 
-func getSoxrSNR(inputRate, outputRate, testFreq float64) (*SNRResult, error) {
+func getSoxrSNR(ctx context.Context, inputRate, outputRate, testFreq float64) (*SNRResult, error) {
 	// Try static data first
 	if refData, err := loadStaticReferenceData(); err == nil {
 		key := fmt.Sprintf("snr_%.0f_%.0f", inputRate, outputRate)
@@ -867,7 +867,7 @@ func getSoxrSNR(inputRate, outputRate, testFreq float64) (*SNRResult, error) {
 	}
 
 	// Fall back to C tool
-	result, err := runSoxrQualityTest(inputRate, outputRate, fmt.Sprintf("snr:%.0f", testFreq))
+	result, err := runSoxrQualityTest(ctx, inputRate, outputRate, fmt.Sprintf("snr:%.0f", testFreq))
 	if err != nil {
 		return nil, err
 	}
@@ -879,7 +879,7 @@ func getSoxrSNR(inputRate, outputRate, testFreq float64) (*SNRResult, error) {
 	}, nil
 }
 
-func getSoxrImpulse(inputRate, outputRate float64) (*ImpulseResult, error) {
+func getSoxrImpulse(ctx context.Context, inputRate, outputRate float64) (*ImpulseResult, error) {
 	// Try static data first
 	if refData, err := loadStaticReferenceData(); err == nil {
 		key := fmt.Sprintf("impulse_%.0f_%.0f", inputRate, outputRate)
@@ -902,7 +902,7 @@ func getSoxrImpulse(inputRate, outputRate float64) (*ImpulseResult, error) {
 	}
 
 	// Fall back to C tool
-	result, err := runSoxrQualityTest(inputRate, outputRate, "impulse")
+	result, err := runSoxrQualityTest(ctx, inputRate, outputRate, "impulse")
 	if err != nil {
 		return nil, err
 	}
@@ -917,7 +917,7 @@ func getSoxrImpulse(inputRate, outputRate float64) (*ImpulseResult, error) {
 }
 
 // runSoxrQualityTest runs the soxr quality test tool and parses output
-func runSoxrQualityTest(inputRate, outputRate float64, testType string) (map[string]float64, error) {
+func runSoxrQualityTest(ctx context.Context, inputRate, outputRate float64, testType string) (map[string]float64, error) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return nil, fmt.Errorf("failed to get current file path")
@@ -930,7 +930,7 @@ func runSoxrQualityTest(inputRate, outputRate float64, testType string) (map[str
 		return nil, fmt.Errorf("soxr quality tool not found at %s (run 'make test_quality' in test-reference/)", toolPath)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*1000*1000*1000) // 30 seconds
+	ctx, cancel := context.WithTimeout(ctx, 30*1000*1000*1000) // 30 seconds
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, toolPath,

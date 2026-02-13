@@ -341,7 +341,7 @@ func benchPrecision[F float32 | float64](b *testing.B, inputRate, outputRate flo
 	b.ResetTimer()
 
 	var totalSamples int64
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		resampler.Reset()
 		output, err := resampler.Process(input)
 		if err != nil {
@@ -392,7 +392,7 @@ func benchPolyphasePrecision[F float32 | float64](b *testing.B, quality Quality,
 	b.ResetTimer()
 
 	var totalSamples int64
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		stage.Reset()
 		output, err := stage.Process(input)
 		if err != nil {
@@ -422,7 +422,7 @@ func benchDFTPrecision[F float32 | float64](b *testing.B, quality Quality) {
 	b.ResetTimer()
 
 	var totalSamples int64
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		stage.Reset()
 		output, err := stage.Process(input)
 		if err != nil {

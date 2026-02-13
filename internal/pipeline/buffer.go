@@ -70,7 +70,7 @@ func (b *RingBuffer) Read(n int) []float64 {
 	result := make([]float64, n)
 
 	// Read samples (may wrap around)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		result[i] = b.data[b.readPos]
 		b.readPos = (b.readPos + 1) % b.capacity
 		b.size--
@@ -95,7 +95,7 @@ func (b *RingBuffer) Peek(n int) []float64 {
 	readPos := b.readPos
 
 	// Copy samples without modifying buffer state
-	for i := 0; i < n; i++ {
+	for i := range n {
 		result[i] = b.data[readPos]
 		readPos = (readPos + 1) % b.capacity
 	}
@@ -226,7 +226,7 @@ func (f *FIFOBuffer) Read(n int) []float64 {
 
 	result := make([]float64, n)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		result[i] = f.data[f.readPos&uint32(f.mask)]
 		f.readPos++
 		f.size--
@@ -241,7 +241,7 @@ func (f *FIFOBuffer) grow() {
 	newData := make([]float64, newCap)
 
 	// Copy existing data
-	for i := 0; i < f.size; i++ {
+	for i := range f.size {
 		newData[i] = f.data[(f.readPos+uint32(i))&uint32(f.mask)]
 	}
 

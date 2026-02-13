@@ -42,7 +42,7 @@ func newConstantRateResampler(config *Config, ratio float64) (*constantRateResam
 	r.pipeline = pipeline
 
 	// Initialize per-channel state
-	for i := 0; i < config.Channels; i++ {
+	for i := range config.Channels {
 		ch := &channelResampler{
 			stages:  make([]Stage, len(pipeline.stages)),
 			buffers: make([]*RingBuffer, len(pipeline.stages)+1),

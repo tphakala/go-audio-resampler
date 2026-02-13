@@ -14,7 +14,7 @@ func benchDotSIMD(b *testing.B, size int) {
 		c[i] = float64(i) * 0.01
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = f64.DotProduct(a, c)
 	}
 }
@@ -28,7 +28,7 @@ func benchDotUnrolled(b *testing.B, size int) {
 		c[i] = float64(i) * 0.01
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		sum0, sum1, sum2, sum3 := 0.0, 0.0, 0.0, 0.0
 		end4 := size &^ 3
 		for j := 0; j < end4; j += 4 {
