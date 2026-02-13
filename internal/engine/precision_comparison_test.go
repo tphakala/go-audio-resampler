@@ -214,6 +214,10 @@ func TestPrecisionComparison_PassbandRipple(t *testing.T) {
 
 // TestPrecisionComparison_Summary provides a comprehensive summary.
 func TestPrecisionComparison_Summary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping precision summary in short mode (expensive O(N²) DFT)")
+	}
+
 	t.Log("===========================================")
 	t.Log("Float32 vs Float64 Precision Summary")
 	t.Log("===========================================")
