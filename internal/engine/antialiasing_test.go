@@ -727,7 +727,7 @@ func TestAntiAliasing_Downsampling(t *testing.T) {
 			// good stopband rejection. For non-integer ratios, the polyphase path has
 			// limited stopband rejection — log as informational.
 			ratio := tc.inputRate / tc.outputRate
-			if ratio == math.Floor(ratio) {
+			if math.Abs(ratio-math.Round(ratio)) < 1e-9 {
 				if result.Attenuation < minStopbandAttenuation {
 					t.Errorf("Anti-aliasing attenuation %.2f dB is below minimum %.2f dB",
 						result.Attenuation, minStopbandAttenuation)
