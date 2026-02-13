@@ -46,3 +46,6 @@ Thumbs.db
 benchmark_results*.txt
 *_benchmark*.txt
 REFACTOR_CHANGELOG.md
+
+# LEANN index
+.leann/
