@@ -246,6 +246,8 @@ func resampleParallel[F Float](
 	var processErr error
 	var errMu sync.Mutex
 
+	// Note: Goroutines are not cancelled on first error. For bounded channel counts
+	// (typically 2-8), letting all complete is simpler than cooperative cancellation.
 	for ch := range channels {
 		wg.Add(1)
 		go func(channel int) {
@@ -260,6 +262,7 @@ func resampleParallel[F Float](
 				errMu.Unlock()
 				return
 			}
+			// Safe: each goroutine writes to a distinct index
 			resampledChannels[channel] = resampled
 		}(ch)
 	}

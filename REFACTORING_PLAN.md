@@ -1,5 +1,7 @@
 # Refactoring Plan: `resampleWAVGeneric` Cognitive Complexity Reduction
 
+> **Note:** This document describes the initial refactoring strategy and design. Code snippets represent the planned approach; actual implementation may differ based on discoveries during development. Refer to the source code for the final implementation.
+
 ## Problem Statement
 
 **File**: [cmd/resample-wav/main.go:217](cmd/resample-wav/main.go#L217)
