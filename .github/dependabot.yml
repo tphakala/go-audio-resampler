@@ -8,6 +8,12 @@ updates:
     labels:
       - dependencies
       - go
+    groups:
+      go-non-major:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: github-actions
     directory: /
@@ -17,3 +23,8 @@ updates:
     labels:
       - dependencies
       - ci
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
