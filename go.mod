@@ -6,8 +6,8 @@ require (
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/wav v1.1.0
 	github.com/stretchr/testify v1.11.1
-	github.com/tphakala/simd v1.0.14
-	gonum.org/v1/gonum v0.16.0
+	github.com/tphakala/simd v1.0.22
+	gonum.org/v1/gonum v0.17.0
 )
 
 require (
