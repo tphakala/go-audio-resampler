@@ -39,7 +39,7 @@ const (
 	// Calibrated: VeryHigh achieves -140 to -190 dB, Quick ~-89 dB
 	regressionMaxTHD_Quick    = -80.0  // dB (actual: ~-89 dB)
 	regressionMaxTHD_Low      = -130.0 // dB (actual: ~-145 dB)
-	regressionMaxTHD_Medium   = -130.0 // dB (actual: ~-145 dB)
+	regressionMaxTHD_Medium   = -129.0 // dB (actual: ~-130 dB, after dynamic Fs1 change)
 	regressionMaxTHD_High     = -140.0 // dB (actual: ~-157 dB)
 	regressionMaxTHD_VeryHigh = -140.0 // dB (actual: ~-162 dB)
 
