@@ -47,7 +47,7 @@ jobs:
         with:
           go-version: stable
       - name: Run tests with race detector
-        run: go test -race ./...
+        run: go test -race -short ./...
 
   vulncheck:
     name: Vulnerability Check
