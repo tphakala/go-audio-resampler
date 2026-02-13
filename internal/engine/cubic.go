@@ -77,8 +77,8 @@ func (c *CubicStage[F]) interpolate(x float64) F {
 	s2 := float64(c.history[0])      // newest  = s[2]
 
 	// SOXR's cubic formula (from cr-core.c:59-61)
-	b := 0.5*(s1+sMinus1) - s0
-	a := (1.0 / 6.0) * (s2 - s1 + sMinus1 - s0 - 4*b)
+	b := 0.5*(s1+sMinus1) - s0                                 //nolint:mnd // Mathematical constant from SOXR formula
+	a := (1.0 / 6.0) * (s2 - s1 + sMinus1 - s0 - 4*b) //nolint:mnd // Mathematical constant from SOXR formula
 	coefC := s1 - s0 - a - b
 
 	// Evaluate polynomial: (((a*x + b)*x + coefC)*x + s[0])
