@@ -58,8 +58,8 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 	// Following SOXR's pattern: ratios between 1/256 and 256 are practical for audio.
 	// Extreme ratios can cause: (1) integer overflow in output size calculation,
 	// (2) memory exhaustion from attempting to allocate huge output buffers.
-	const minRatio = 1.0 / 256.0  // 256x downsampling
-	const maxRatio = 256.0         // 256x upsampling
+	const minRatio = 1.0 / 256.0 // 256x downsampling
+	const maxRatio = 256.0       // 256x upsampling
 	if ratio < minRatio || ratio > maxRatio {
 		return nil, fmt.Errorf("resampling ratio %.6f out of valid range [%.6f, %.0f]", ratio, minRatio, maxRatio)
 	}

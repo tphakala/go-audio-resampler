@@ -65,9 +65,10 @@ func (c *CubicStage[F]) Process(input []F) ([]F, error) {
 // where x is the fractional position between samples.
 //
 // SOXR formula from cr-core.c:59-61:
-//   b = 0.5*(s[1]+s[-1]) - s[0]
-//   a = (1/6)*(s[2]-s[1]+s[-1]-s[0] - 4*b)
-//   coefC = s[1] - s[0] - a - b
+//
+//	b = 0.5*(s[1]+s[-1]) - s[0]
+//	a = (1/6)*(s[2]-s[1]+s[-1]-s[0] - 4*b)
+//	coefC = s[1] - s[0] - a - b
 func (c *CubicStage[F]) interpolate(x float64) F {
 	// Get the 4 points for interpolation
 	// Map to SOXR's convention: s[-1], s[0], s[1], s[2]
@@ -77,7 +78,7 @@ func (c *CubicStage[F]) interpolate(x float64) F {
 	s2 := float64(c.history[0])      // newest  = s[2]
 
 	// SOXR's cubic formula (from cr-core.c:59-61)
-	b := 0.5*(s1+sMinus1) - s0                                 //nolint:mnd // Mathematical constant from SOXR formula
+	b := 0.5*(s1+sMinus1) - s0                        //nolint:mnd // Mathematical constant from SOXR formula
 	a := (1.0 / 6.0) * (s2 - s1 + sMinus1 - s0 - 4*b) //nolint:mnd // Mathematical constant from SOXR formula
 	coefC := s1 - s0 - a - b
 

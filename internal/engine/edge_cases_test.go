@@ -499,16 +499,16 @@ func TestNewResampler_InvalidRates(t *testing.T) {
 		wantErr    bool
 	}{
 		{"valid_rates", 44100, 48000, false},
-		{"valid_max_ratio", 1000, 256000, false},      // ratio = 256 (max)
-		{"valid_min_ratio", 256000, 1000, false},      // ratio = 1/256 (min)
+		{"valid_max_ratio", 1000, 256000, false}, // ratio = 256 (max)
+		{"valid_min_ratio", 256000, 1000, false}, // ratio = 1/256 (min)
 		{"zero_input", 0, 48000, true},
 		{"zero_output", 44100, 0, true},
 		{"negative_input", -44100, 48000, true},
 		{"negative_output", 44100, -48000, true},
 		{"both_zero", 0, 0, true},
-		{"ratio_too_large", 1000, 300000, true},       // ratio = 300 (> 256)
-		{"ratio_too_small", 300000, 1000, true},       // ratio = 1/300 (< 1/256)
-		{"extreme_ratio", 1000, 1e9, true},            // ratio = 1e6 (way too large)
+		{"ratio_too_large", 1000, 300000, true}, // ratio = 300 (> 256)
+		{"ratio_too_small", 300000, 1000, true}, // ratio = 1/300 (< 1/256)
+		{"extreme_ratio", 1000, 1e9, true},      // ratio = 1e6 (way too large)
 	}
 
 	for _, tc := range testCases {

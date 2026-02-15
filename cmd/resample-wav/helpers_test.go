@@ -31,7 +31,7 @@ func TestOpenWAVInput_InvalidWAV(t *testing.T) {
 
 func TestCreateChannelResamplers_Mono(t *testing.T) {
 	resamplers, err := createChannelResamplers[float64](
-		1,           // mono
+		1,            // mono
 		44100, 48000, // rates
 		engine.QualityHigh,
 	)
@@ -42,7 +42,7 @@ func TestCreateChannelResamplers_Mono(t *testing.T) {
 
 func TestCreateChannelResamplers_Stereo(t *testing.T) {
 	resamplers, err := createChannelResamplers[float64](
-		2,           // stereo
+		2,            // stereo
 		44100, 48000, // rates
 		engine.QualityHigh,
 	)
@@ -54,7 +54,7 @@ func TestCreateChannelResamplers_Stereo(t *testing.T) {
 
 func TestCreateChannelResamplers_Multichannel(t *testing.T) {
 	resamplers, err := createChannelResamplers[float64](
-		8,           // 7.1 surround
+		8,            // 7.1 surround
 		44100, 48000, // rates
 		engine.QualityHigh,
 	)
@@ -99,8 +99,8 @@ func TestNewResampleBuffers(t *testing.T) {
 		NumChannels: 2,
 	}
 	buffers := newResampleBuffers[float64](
-		2,           // stereo
-		16,          // 16-bit
+		2,            // stereo
+		16,           // 16-bit
 		44100, 48000, // rates
 		format,
 	)
@@ -142,7 +142,7 @@ func TestProgressTracker_ZeroSamples(t *testing.T) {
 func TestResampleSequential_Success(t *testing.T) {
 	// Create resamplers
 	resamplers, err := createChannelResamplers[float64](
-		2,           // stereo
+		2,            // stereo
 		44100, 48000, // rates
 		engine.QualityHigh,
 	)
@@ -172,7 +172,7 @@ func TestResampleSequential_Success(t *testing.T) {
 func TestResampleParallel_Success(t *testing.T) {
 	// Create resamplers
 	resamplers, err := createChannelResamplers[float64](
-		2,           // stereo
+		2,            // stereo
 		44100, 48000, // rates
 		engine.QualityHigh,
 	)
@@ -202,7 +202,7 @@ func TestResampleParallel_Success(t *testing.T) {
 func TestResampleChannelData_ParallelMode(t *testing.T) {
 	// Create resamplers
 	resamplers, err := createChannelResamplers[float64](
-		2,           // stereo
+		2,            // stereo
 		44100, 48000, // rates
 		engine.QualityHigh,
 	)
@@ -223,7 +223,7 @@ func TestResampleChannelData_ParallelMode(t *testing.T) {
 func TestResampleChannelData_SequentialMode(t *testing.T) {
 	// Create resamplers
 	resamplers, err := createChannelResamplers[float64](
-		2,           // stereo
+		2,            // stereo
 		44100, 48000, // rates
 		engine.QualityHigh,
 	)
@@ -244,7 +244,7 @@ func TestResampleChannelData_SequentialMode(t *testing.T) {
 func TestResampleChannelData_MonoFallsBackToSequential(t *testing.T) {
 	// Create mono resampler
 	resamplers, err := createChannelResamplers[float64](
-		1,           // mono
+		1,            // mono
 		44100, 48000, // rates
 		engine.QualityHigh,
 	)
@@ -264,7 +264,7 @@ func TestResampleChannelData_MonoFallsBackToSequential(t *testing.T) {
 func TestFlushAndPadChannels_EqualLengths(t *testing.T) {
 	// Create resamplers
 	resamplers, err := createChannelResamplers[float64](
-		2,           // stereo
+		2,            // stereo
 		44100, 48000, // rates
 		engine.QualityHigh,
 	)
@@ -291,7 +291,7 @@ func TestFlushAndPadChannels_EqualLengths(t *testing.T) {
 func TestFlushAndPadChannels_EmptyFlush(t *testing.T) {
 	// Create resamplers but don't process any data
 	resamplers, err := createChannelResamplers[float64](
-		2,           // stereo
+		2,            // stereo
 		44100, 48000, // rates
 		engine.QualityHigh,
 	)
