@@ -32,6 +32,8 @@ Thumbs.db
 # Build output
 /bin/
 /dist/
+/resample-wav
+/test-reference/test_quality
 
 # Debug files
 *.log
