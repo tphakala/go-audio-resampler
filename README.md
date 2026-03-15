@@ -1,7 +1,10 @@
 # go-audio-resampler
 
+[![CI](https://github.com/tphakala/go-audio-resampler/actions/workflows/ci.yml/badge.svg)](https://github.com/tphakala/go-audio-resampler/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/tphakala/go-audio-resampler/branch/master/graph/badge.svg)](https://codecov.io/gh/tphakala/go-audio-resampler)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tphakala/go-audio-resampler.svg)](https://pkg.go.dev/github.com/tphakala/go-audio-resampler)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tphakala/go-audio-resampler)](https://goreportcard.com/report/github.com/tphakala/go-audio-resampler)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/tphakala/go-audio-resampler/badge)](https://scorecard.dev/viewer/?uri=github.com/tphakala/go-audio-resampler)
 
 The **only pure Go** high-quality audio resampling library (that I know of) - **no CGO dependencies** required.
 

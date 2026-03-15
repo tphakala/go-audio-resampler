@@ -1,0 +1,49 @@
+name: Benchmark
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  benchmark:
+    name: Benchmark Comparison
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run benchmarks on PR
+        run: go test -bench=. -benchmem -count=5 -timeout=10m ./... | tee pr.bench
+
+      - name: Checkout base
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Run benchmarks on base
+        run: go test -bench=. -benchmem -count=5 -timeout=10m ./... | tee base.bench
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: Compare benchmarks
+        run: |
+          echo '## Benchmark Comparison' > bench-report.md
+          echo '' >> bench-report.md
+          echo '```' >> bench-report.md
+          benchstat base.bench pr.bench >> bench-report.md 2>&1 || true
+          echo '```' >> bench-report.md
+
+      - name: Post benchmark results
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: benchmark
+          path: bench-report.md
