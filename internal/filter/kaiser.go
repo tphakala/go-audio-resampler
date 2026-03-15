@@ -11,8 +11,9 @@ import (
 
 const (
 	// Filter design constants
-	minFilterTaps = 3
-	maxFilterTaps = 8191
+	minFilterTaps  = 3
+	maxFilterTaps  = 8191
+	maxAttenuation = 500 // dB; beyond this BesselI0 overflows in Kaiser window
 
 	// Window normalization
 	windowNormalizationFactor = 2.0
@@ -59,6 +60,9 @@ func KaiserWindow(length int, beta float64) []float64 {
 	// w[n] = I₀(β * sqrt(1 - ((n - α)/α)²)) / I₀(β)
 	// where α = (N-1)/2 and N is the window length
 
+	// Use absolute value: I₀(x) = I₀(-x), so negative beta is equivalent
+	beta = math.Abs(beta)
+
 	alpha := float64(length-1) / windowNormalizationFactor
 	i0Beta := mathutil.BesselI0(beta)
 
@@ -68,7 +72,18 @@ func KaiserWindow(length int, beta float64) []float64 {
 
 		// Kaiser window formula
 		arg := beta * math.Sqrt(1.0-x*x)
-		window[n] = mathutil.BesselI0(arg) / i0Beta
+		i0Arg := mathutil.BesselI0(arg)
+
+		// Handle overflow: when both BesselI0 values are +Inf (extreme beta),
+		// use the ratio of the arguments as a fallback. At center (arg==beta)
+		// the window value should be 1.0, at edges (arg==0) it should be 1/I₀(β).
+		if math.IsInf(i0Arg, 1) && math.IsInf(i0Beta, 1) {
+			// For extreme beta, the window concentrates sharply at center.
+			// Approximate: w[n] ≈ exp(arg - beta) which is exp(β*(sqrt(1-x²)-1))
+			window[n] = math.Exp(arg - beta)
+		} else {
+			window[n] = i0Arg / i0Beta
+		}
 	}
 
 	return window
@@ -108,6 +123,10 @@ func (fp *FilterParams) Validate() error {
 
 	if fp.Attenuation < 0 {
 		return fmt.Errorf("invalid attenuation: %f dB (must be positive)", fp.Attenuation)
+	}
+
+	if fp.Attenuation > maxAttenuation {
+		return fmt.Errorf("invalid attenuation: %f dB (maximum %d)", fp.Attenuation, maxAttenuation)
 	}
 
 	if fp.Gain <= 0 {
