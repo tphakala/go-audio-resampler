@@ -23,8 +23,6 @@ const (
 	sincPiMultiplier  = math.Pi
 	sincZeroThreshold = 1e-10
 
-	// Filter normalization
-	filterGainTarget = 1.0
 )
 
 // KaiserWindow generates a Kaiser window of the specified length and β parameter.

@@ -34,7 +34,6 @@ import (
 
 const (
 	// soxr bit precision for each quality level
-	soxrBitsQuick    = 0  // Cubic interpolation, no FIR filter
 	soxrBitsLow      = 16 // 16-bit precision
 	soxrBitsMedium   = 16 // Same as Low in terms of bits
 	soxrBitsHigh     = 20 // SOXR_HQ = SOXR_20_BITQ
@@ -50,12 +49,8 @@ const (
 	soxrAttenuationHigh     = (soxrBitsHigh + 1) * soxrDBPerBit     // ~126.43 dB
 	soxrAttenuationVeryHigh = (soxrBitsVeryHigh + 1) * soxrDBPerBit // ~174.60 dB
 
-	// soxr LOW_Q_BW0 = 1385/2048 ≈ 0.67625 (used for SOXR_LQ passband)
-	soxrLowQualityBW0 = 1385.0 / 2048.0
-
 	// Tolerance for floating point comparisons
-	attenuationTolerance = 0.1   // dB
-	passbandTolerance    = 0.001 // Normalized frequency
+	attenuationTolerance = 0.1 // dB
 )
 
 // =============================================================================

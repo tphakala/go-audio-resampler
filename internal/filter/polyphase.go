@@ -26,13 +26,8 @@ const (
 	// Increased from 4 to 16 to match soxr's approach and ensure uniform DC gain
 	minTapsPerPhase = 16
 
-	// Phase precision (bits for fractional phase index)
-	phasePrecisionBits = 20
-	phasePrecisionMask = (1 << phasePrecisionBits) - 1
-
 	// Polyphase decomposition constants
 	nextPhaseOffset       = 1
-	prevPhaseLookback     = 1
 	secondNextPhaseOffset = 2
 
 	// Interpolation polynomial coefficients

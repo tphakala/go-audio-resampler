@@ -17,10 +17,6 @@ const (
 	testNumPhases1024 = 1024
 
 	testTransition005 = 0.05
-
-	// Test tolerances
-	coeffTolerance = 1e-10
-	freqTolerance  = 1e-6
 )
 
 // TestPolyphaseParams_Validate tests parameter validation.

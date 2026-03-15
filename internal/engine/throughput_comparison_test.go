@@ -24,9 +24,6 @@ import (
 // =============================================================================
 
 const (
-	// Number of samples per throughput test iteration (1 second at 48kHz)
-	throughputTestSamples = 48000
-
 	// Number of iterations for throughput measurement
 	throughputIterations = 100
 )

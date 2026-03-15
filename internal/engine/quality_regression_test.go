@@ -24,9 +24,6 @@ const (
 	// DC gain must be within this tolerance of 1.0
 	regressionDCGainTolerance = 0.001
 
-	// Sine wave amplitude deviation tolerance (for 1kHz in passband)
-	regressionAmplitudeTolerance = 0.05 // 5%
-
 	// Maximum passband ripple in dB (peak-to-peak)
 	// Calibrated: actual performance is ~1.3 dB for fractional ratios (polyphase)
 	//             Quick quality uses cubic interpolation: ~5.1 dB (matches SOXR)
@@ -52,14 +49,6 @@ const (
 	regressionMinSNR_High     = 35.0 // dB (actual: varies)
 	regressionMinSNR_VeryHigh = 35.0 // dB (actual: varies by ratio)
 
-	// Anti-aliasing attenuation for downsampling (must be at least this many dB)
-	// Note: This test measures attenuation of a tone 1kHz above output Nyquist.
-	// Calibrated: actual performance varies by ratio (40-100 dB typical)
-	regressionMinAntiAliasing_Quick    = 30.0 // dB (actual: ~72 dB)
-	regressionMinAntiAliasing_Low      = 30.0 // dB (actual: ~72 dB)
-	regressionMinAntiAliasing_Medium   = 30.0 // dB (actual: ~72 dB)
-	regressionMinAntiAliasing_High     = 30.0 // dB (actual: ~72 dB)
-	regressionMinAntiAliasing_VeryHigh = 30.0 // dB (actual: ~72 dB)
 )
 
 // TestQualityRegression_DCGain verifies DC gain hasn't regressed
@@ -510,84 +499,3 @@ func measurePassbandRippleInternal(t *testing.T, inputRate, outputRate float64, 
 	return maxDev - minDev
 }
 
-func measureAntiAliasingInternal(t *testing.T, inputRate, outputRate float64, quality Quality) float64 {
-	t.Helper()
-
-	// Only meaningful for downsampling
-	if outputRate >= inputRate {
-		return 200.0 // Return high value for upsampling (not applicable)
-	}
-
-	numSamples := 65536
-	fftSize := 16384
-
-	// Generate TWO tones:
-	// 1. Reference tone in passband (1kHz) - should pass through
-	// 2. Alias tone above output Nyquist - should be filtered
-	outputNyquist := outputRate / 2.0
-	refFreq := 1000.0                 // Reference: 1kHz (well within passband)
-	aliasFreq := outputNyquist + 1000 // 1kHz above output Nyquist (will alias to ~15kHz for 48->32k)
-
-	input := make([]float64, numSamples)
-	for i := range input {
-		refPhase := 2.0 * math.Pi * refFreq * float64(i) / inputRate
-		aliasPhase := 2.0 * math.Pi * aliasFreq * float64(i) / inputRate
-		input[i] = 0.5*math.Sin(refPhase) + 0.5*math.Sin(aliasPhase)
-	}
-
-	resampler, err := NewResampler[float64](inputRate, outputRate, quality)
-	if err != nil {
-		t.Fatalf("NewResampler failed: %v", err)
-	}
-
-	output, _ := resampler.Process(input)
-	flush, _ := resampler.Flush()
-	output = append(output, flush...)
-
-	// Compute FFT
-	fftIn := make([]complex128, fftSize)
-	for i := 0; i < fftSize && i < len(output); i++ {
-		window := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
-		fftIn[i] = complex(output[i]*window, 0)
-	}
-
-	fftOut := fft(fftIn)
-
-	// Find reference level (1kHz tone in output)
-	refBin := int(refFreq / outputRate * float64(fftSize))
-	maxRef := -200.0
-	for b := -3; b <= 3; b++ {
-		if refBin+b > 0 && refBin+b < len(fftOut)/2 {
-			mag := cmplx.Abs(fftOut[refBin+b])
-			magDB := 20 * math.Log10(mag+1e-20)
-			if magDB > maxRef {
-				maxRef = magDB
-			}
-		}
-	}
-
-	// Find the aliased frequency in output
-	// Alias folds around Nyquist: aliasFreq -> 2*Nyquist - aliasFreq
-	aliasedFreq := outputNyquist - (aliasFreq - outputNyquist)
-	if aliasedFreq < 0 {
-		aliasedFreq = -aliasedFreq
-	}
-
-	aliasBin := int(aliasedFreq / outputRate * float64(fftSize))
-
-	// Find peak near alias frequency
-	maxAlias := -200.0
-	for b := -5; b <= 5; b++ {
-		if aliasBin+b > 0 && aliasBin+b < len(fftOut)/2 {
-			mag := cmplx.Abs(fftOut[aliasBin+b])
-			magDB := 20 * math.Log10(mag+1e-20)
-			if magDB > maxAlias {
-				maxAlias = magDB
-			}
-		}
-	}
-
-	// Attenuation = reference level - alias level
-	// Both measured in the same FFT, so directly comparable
-	return maxRef - maxAlias
-}

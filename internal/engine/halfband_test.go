@@ -44,9 +44,9 @@ func TestAnalyzeHalfbandStructure(t *testing.T) {
 	t.Log("\nSample coefficients (first 10):")
 	for phase := range stage.factor {
 		var coeffStr strings.Builder
-		coeffStr.WriteString(fmt.Sprintf("Phase %d: ", phase))
+		fmt.Fprintf(&coeffStr, "Phase %d: ", phase)
 		for i := 0; i < 10 && i < len(stage.polyCoeffs[phase]); i++ {
-			coeffStr.WriteString(fmt.Sprintf("%.4f ", stage.polyCoeffs[phase][i]))
+			fmt.Fprintf(&coeffStr, "%.4f ", stage.polyCoeffs[phase][i])
 		}
 		t.Log(coeffStr.String() + "...")
 	}

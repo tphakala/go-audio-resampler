@@ -36,12 +36,8 @@ const (
 	// Frequency response test parameters
 	testNumPoints512  = 512
 	testNumPoints1024 = 1024
-	testPassbandFreq  = 0.2
-	testStopbandFreq  = 0.3
-
 	// dB thresholds
 	passbandRippleDB = 0.1
-	stopbandFloorDB  = -100.0
 )
 
 // TestKaiserWindow_Symmetry verifies that Kaiser window is symmetric.
