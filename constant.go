@@ -27,11 +27,8 @@ type channelResampler struct {
 	stages  []Stage
 	buffers []*RingBuffer
 
-	// Pre-allocated scratch buffers for the zero-copy path.
-	// readScratch is reused by ReadInto to avoid ring buffer allocations.
+	// Pre-allocated scratch buffer reused by ReadInto to avoid allocations.
 	readScratch []float64
-	// outputScratch holds the final output assembled from ReadInto calls.
-	outputScratch []float64
 }
 
 // newConstantRateResampler creates a new constant-rate resampler.
@@ -97,6 +94,9 @@ func (r *constantRateResampler) Process(input []float64) ([]float64, error) {
 func (r *constantRateResampler) ProcessInto(input, output []float64) (int, error) {
 	if len(r.channels) == 0 {
 		return 0, fmt.Errorf("no channels initialized")
+	}
+	if len(output) < r.EstimateOutput(len(input)) {
+		return 0, ErrBufferTooSmall
 	}
 
 	return r.processChannelInto(0, input, output)
@@ -229,7 +229,7 @@ func (r *constantRateResampler) processChannel(channel int, input []float64) ([]
 
 // processChannelInto processes a single channel through the pipeline using the
 // zero-copy path when available, and writes the output into dst. Returns the
-// number of samples written. If dst is too small, it falls back to allocating.
+// number of samples written.
 func (r *constantRateResampler) processChannelInto(channel int, input, dst []float64) (int, error) {
 	if channel >= len(r.channels) {
 		return 0, fmt.Errorf("channel %d out of range", channel)
@@ -271,6 +271,9 @@ func (r *constantRateResampler) processChannelInto(channel int, input, dst []flo
 	}
 
 	finalBuffer := ch.buffers[len(ch.buffers)-1]
+	if finalBuffer.Available() > len(dst) {
+		return 0, ErrBufferTooSmall
+	}
 	n := finalBuffer.ReadInto(dst)
 	return n, nil
 }

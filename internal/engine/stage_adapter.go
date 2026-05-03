@@ -126,16 +126,24 @@ func (s *StageAdapter[F]) GetSIMDInfo() string {
 // a float32 adapter will fall back to the allocating Process path.
 func (s *StageAdapter[F]) ProcessZeroCopy(input []float64) ([]float64, error) {
 	r, ok := any(s.Resampler).(*Resampler[float64])
-	if !ok {
-		// float32 adapter: convert and use allocating path (not used in pipeline)
-		f64In := any(input).([]F) //nolint:errcheck
-		out, err := s.Resampler.Process(f64In)
-		if err != nil {
-			return nil, err
-		}
-		return any(out).([]float64), nil //nolint:errcheck
+	if ok {
+		return r.ProcessZeroCopy(input)
 	}
-	return r.ProcessZeroCopy(input)
+
+	// float32 adapter fallback: convert input/output types and use allocating path.
+	typedInput := make([]F, len(input))
+	for i, sample := range input {
+		typedInput[i] = F(sample)
+	}
+	typedOutput, err := s.Resampler.Process(typedInput)
+	if err != nil {
+		return nil, err
+	}
+	output := make([]float64, len(typedOutput))
+	for i, sample := range typedOutput {
+		output[i] = float64(sample)
+	}
+	return output, nil
 }
 
 var _ pipeline.ZeroCopyProcessor = (*StageAdapter[float64])(nil)

@@ -139,10 +139,16 @@ func (r *SimpleResampler) Process(input []float64) ([]float64, error) {
 // directly into the provided buffer. Returns ErrBufferTooSmall if output
 // cannot hold all produced samples.
 func (r *SimpleResampler) ProcessInto(input, output []float64) (int, error) {
+	required := r.EstimateOutput(len(input))
+	if len(output) < required {
+		return 0, ErrBufferTooSmall
+	}
+
 	result, err := r.engine.ProcessZeroCopy(input)
 	if err != nil {
 		return 0, err
 	}
+	// Guard against future EstimateOutput regressions.
 	if len(output) < len(result) {
 		return 0, ErrBufferTooSmall
 	}

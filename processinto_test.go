@@ -6,6 +6,11 @@ import (
 	"testing"
 )
 
+type processIntoResampler interface {
+	ProcessInto(input, output []float64) (int, error)
+	EstimateOutput(inputLen int) int
+}
+
 // TestProcessInto_MatchesProcess is a permanent regression test verifying that
 // ProcessInto produces bit-identical output to Process for every common rate
 // pair. This guards against future refactors accidentally diverging the two
@@ -143,6 +148,88 @@ func TestProcessInto_BufferTooSmall(t *testing.T) {
 
 	tinyOutput := make([]float64, 10) // way too small
 	_, err = r.ProcessInto(input, tinyOutput)
+	if err != ErrBufferTooSmall {
+		t.Fatalf("expected ErrBufferTooSmall, got %v", err)
+	}
+}
+
+// TestProcessInto_BufferTooSmallDoesNotAdvanceState verifies callers can retry
+// with a larger buffer without losing output from the failed attempt.
+func TestProcessInto_BufferTooSmallDoesNotAdvanceState(t *testing.T) {
+	const (
+		inRate  = 48000.0
+		outRate = 32000.0
+	)
+
+	input := make([]float64, int(inRate*3))
+	for i := range input {
+		input[i] = math.Sin(2.0 * math.Pi * 440.0 * float64(i) / inRate)
+	}
+
+	expectedResampler, err := NewEngine(inRate, outRate, QualityMedium)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedBuf := make([]float64, expectedResampler.EstimateOutput(len(input)))
+	expectedN, err := expectedResampler.ProcessInto(input, expectedBuf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := expectedBuf[:expectedN]
+
+	retryResampler, err := NewEngine(inRate, outRate, QualityMedium)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tinyBuf := make([]float64, 1)
+	_, err = retryResampler.ProcessInto(input, tinyBuf)
+	if err != ErrBufferTooSmall {
+		t.Fatalf("expected ErrBufferTooSmall on first attempt, got %v", err)
+	}
+
+	retryBuf := make([]float64, retryResampler.EstimateOutput(len(input)))
+	retryN, err := retryResampler.ProcessInto(input, retryBuf)
+	if err != nil {
+		t.Fatalf("retry failed after ErrBufferTooSmall: %v", err)
+	}
+	retryOutput := retryBuf[:retryN]
+
+	if len(retryOutput) != len(expected) {
+		t.Fatalf("retry length mismatch: got %d, expected %d", len(retryOutput), len(expected))
+	}
+	for i := range expected {
+		if retryOutput[i] != expected[i] {
+			t.Fatalf("retry output mismatch at sample %d: got %v, expected %v", i, retryOutput[i], expected[i])
+		}
+	}
+}
+
+// TestProcessInto_BufferTooSmall_NewPath verifies the New(...) API path returns
+// ErrBufferTooSmall instead of silently truncating output.
+func TestProcessInto_BufferTooSmall_NewPath(t *testing.T) {
+	r, err := New(&Config{
+		InputRate:  48000,
+		OutputRate: 96000,
+		Channels:   1,
+		Quality:    QualitySpec{Preset: QualityMedium},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	processIntoR, ok := r.(processIntoResampler)
+	if !ok {
+		t.Fatal("New(...) result does not implement ProcessInto")
+	}
+
+	input := make([]float64, 48000)
+	for i := range input {
+		input[i] = float64(i) * 1e-5
+	}
+
+	tinyOutput := make([]float64, 1)
+	_, err = processIntoR.ProcessInto(input, tinyOutput)
 	if err != ErrBufferTooSmall {
 		t.Fatalf("expected ErrBufferTooSmall, got %v", err)
 	}
