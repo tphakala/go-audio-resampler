@@ -669,10 +669,10 @@ func NewDFTStage[F simdops.Float](factor int, quality Quality) (*DFTStage[F], er
 	}, nil
 }
 
-// Process upsamples the input using polyphase FIR filtering.
-// Uses polyphase decomposition to avoid multiplying by zeros.
-// Optimized for cache efficiency: processes in L2-sized chunks for large inputs.
-// processZeroCopy is the allocation-free internal path. The returned slice
+// processZeroCopy upsamples the input using polyphase FIR filtering.
+// It uses polyphase decomposition to avoid multiplying by zeros.
+// For large inputs it processes in L2-sized chunks for cache efficiency.
+// The returned slice
 // aliases s.outputBuf and is only valid until the next call to processZeroCopy,
 // Process, or Flush. Pipeline-internal callers that consume the output
 // immediately (e.g. writing it into the next stage's buffer) should use this
