@@ -83,6 +83,7 @@ func (r *constantRateResampler) Process(input []float64) ([]float64, error) {
 		return nil, fmt.Errorf("no channels initialized")
 	}
 
+	// Use first channel for mono processing
 	return r.processChannel(0, input)
 }
 
