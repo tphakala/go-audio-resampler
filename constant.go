@@ -87,10 +87,11 @@ func (r *constantRateResampler) Process(input []float64) ([]float64, error) {
 }
 
 // ProcessInto resamples input into the caller-provided output buffer.
-// Returns the number of output samples written. The caller must provide
-// an output buffer large enough for the expected output; use EstimateOutput
-// to determine the required size. Returns ErrBufferTooSmall if output is
-// too small to hold all produced samples.
+// It writes up to len(output) samples and returns the number of valid samples;
+// callers should consume output[:n]. The buffer tail beyond n is undefined.
+//
+// If output is too small, ProcessInto returns ErrBufferTooSmall before any
+// processing state is advanced, so callers can retry with a larger buffer.
 func (r *constantRateResampler) ProcessInto(input, output []float64) (int, error) {
 	if len(r.channels) == 0 {
 		return 0, fmt.Errorf("no channels initialized")

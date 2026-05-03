@@ -3,12 +3,26 @@ package resampler
 import (
 	"fmt"
 	"math"
+	"math/rand"
 	"testing"
 )
 
 type processIntoResampler interface {
 	ProcessInto(input, output []float64) (int, error)
 	EstimateOutput(inputLen int) int
+}
+
+func makeDeterministicInput(rng *rand.Rand, inputLen int, inputRate float64) []float64 {
+	input := make([]float64, inputLen)
+	phase1 := rng.Float64() * 2 * math.Pi
+	phase2 := rng.Float64() * 2 * math.Pi
+	for i := range input {
+		t := float64(i) / inputRate
+		input[i] = 0.7*math.Sin(2*math.Pi*440*t+phase1) +
+			0.2*math.Sin(2*math.Pi*1750*t+phase2) +
+			0.1*(rng.Float64()-0.5)
+	}
+	return input
 }
 
 // TestProcessInto_MatchesProcess is a permanent regression test verifying that
@@ -283,5 +297,136 @@ func TestProcessInto_MultipleChunks(t *testing.T) {
 			t.Fatalf("streaming sample %d differs: Process=%v, ProcessInto=%v",
 				i, allProcess[i], allInto[i])
 		}
+	}
+}
+
+// TestEstimateOutput_UpperBound_NewEngine verifies that EstimateOutput provides
+// a sufficient upper bound for ProcessInto during streaming workloads.
+func TestEstimateOutput_UpperBound_NewEngine(t *testing.T) {
+	type rateCase struct {
+		name            string
+		inRate, outRate float64
+	}
+
+	cases := []rateCase{
+		{"48to16", 48000, 16000},
+		{"48to32", 48000, 32000},
+		{"44_1to32", 44100, 32000},
+		{"44_1to48", 44100, 48000},
+		{"48to44_1", 48000, 44100},
+	}
+
+	const (
+		maxChunkLen = 24000
+		iterations  = 120
+	)
+
+	for idx, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rng := rand.New(rand.NewSource(1337 + int64(idx)))
+
+			rProcess, err := NewEngine(tc.inRate, tc.outRate, QualityMedium)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rInto, err := NewEngine(tc.inRate, tc.outRate, QualityMedium)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			for i := range iterations {
+				inputLen := 1 + rng.Intn(maxChunkLen)
+				input := makeDeterministicInput(rng, inputLen, tc.inRate)
+
+				expected, err := rProcess.Process(input)
+				if err != nil {
+					t.Fatalf("Process failed at iteration %d: %v", i, err)
+				}
+
+				estimate := rInto.EstimateOutput(inputLen)
+				output := make([]float64, estimate)
+				n, err := rInto.ProcessInto(input, output)
+				if err != nil {
+					t.Fatalf("ProcessInto failed at iteration %d (input=%d, estimate=%d): %v", i, inputLen, estimate, err)
+				}
+				if n > estimate {
+					t.Fatalf("ProcessInto wrote beyond estimate at iteration %d: wrote=%d estimate=%d", i, n, estimate)
+				}
+				if n != len(expected) {
+					t.Fatalf("length mismatch at iteration %d: Process=%d ProcessInto=%d", i, len(expected), n)
+				}
+			}
+		})
+	}
+}
+
+// TestEstimateOutput_UpperBound_NewPath verifies that EstimateOutput is
+// sufficient for ProcessInto on the New(...) API path during streaming.
+func TestEstimateOutput_UpperBound_NewPath(t *testing.T) {
+	type rateCase struct {
+		name            string
+		inRate, outRate float64
+	}
+
+	cases := []rateCase{
+		{"48to16", 48000, 16000},
+		{"48to32", 48000, 32000},
+		{"44_1to32", 44100, 32000},
+		{"44_1to48", 44100, 48000},
+		{"48to44_1", 48000, 44100},
+	}
+
+	const (
+		maxChunkLen = 24000
+		iterations  = 80
+	)
+
+	for idx, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rng := rand.New(rand.NewSource(7331 + int64(idx)))
+
+			cfg := &Config{
+				InputRate:  tc.inRate,
+				OutputRate: tc.outRate,
+				Channels:   1,
+				Quality:    QualitySpec{Preset: QualityMedium},
+			}
+
+			rProcess, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rIntoRaw, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rInto, ok := rIntoRaw.(processIntoResampler)
+			if !ok {
+				t.Fatal("New(...) result does not implement ProcessInto")
+			}
+
+			for i := range iterations {
+				inputLen := 1 + rng.Intn(maxChunkLen)
+				input := makeDeterministicInput(rng, inputLen, tc.inRate)
+
+				expected, err := rProcess.Process(input)
+				if err != nil {
+					t.Fatalf("Process failed at iteration %d: %v", i, err)
+				}
+
+				estimate := rInto.EstimateOutput(inputLen)
+				output := make([]float64, estimate)
+				n, err := rInto.ProcessInto(input, output)
+				if err != nil {
+					t.Fatalf("ProcessInto failed at iteration %d (input=%d, estimate=%d): %v", i, inputLen, estimate, err)
+				}
+				if n > estimate {
+					t.Fatalf("ProcessInto wrote beyond estimate at iteration %d: wrote=%d estimate=%d", i, n, estimate)
+				}
+				if n != len(expected) {
+					t.Fatalf("length mismatch at iteration %d: Process=%d ProcessInto=%d", i, len(expected), n)
+				}
+			}
+		})
 	}
 }

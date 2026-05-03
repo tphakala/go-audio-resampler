@@ -59,6 +59,30 @@
 //	// Flush remaining samples
 //	final, _ := r.Flush()
 //
+// # Zero-Allocation Streaming
+//
+// For allocation-sensitive workloads, [SimpleResampler.ProcessInto] writes into
+// caller-provided buffers:
+//
+//	r, err := resampler.NewEngine(48000, 32000, resampler.QualityMedium)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	out := make([]float64, r.EstimateOutput(len(input)))
+//	n, err := r.ProcessInto(input, out)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	use(out[:n]) // Only out[:n] is valid
+//
+// Contract:
+//   - [SimpleResampler.EstimateOutput] returns a conservative upper bound.
+//   - [SimpleResampler.ProcessInto] returns [ErrBufferTooSmall] if output is
+//     undersized.
+//   - On [ErrBufferTooSmall], processing state is not advanced, so callers can
+//     retry with a larger buffer.
+//   - Data beyond output[:n] is unspecified.
+//
 // # Quality Presets
 //
 // The library provides several quality presets for common use cases:

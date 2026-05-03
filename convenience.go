@@ -134,10 +134,11 @@ func (r *SimpleResampler) Process(input []float64) ([]float64, error) {
 }
 
 // ProcessInto resamples input into the caller-provided output buffer.
-// Returns the number of output samples written. The returned slice aliases
-// internal buffers only while zero-copy is active; the output is written
-// directly into the provided buffer. Returns ErrBufferTooSmall if output
-// cannot hold all produced samples.
+// It writes up to len(output) samples and returns the number of valid samples;
+// callers should consume output[:n]. The buffer tail beyond n is undefined.
+//
+// If output is too small, ProcessInto returns ErrBufferTooSmall before any
+// processing state is advanced, so callers can retry with a larger buffer.
 func (r *SimpleResampler) ProcessInto(input, output []float64) (int, error) {
 	required := r.EstimateOutput(len(input))
 	if len(output) < required {

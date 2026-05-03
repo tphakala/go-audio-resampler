@@ -101,6 +101,48 @@ func main() {
 }
 ```
 
+### Zero-Allocation Streaming (`ProcessInto`)
+
+For allocation-sensitive pipelines, use caller-owned output buffers:
+
+```go
+r, err := resampling.NewEngine(48000, 32000, resampling.QualityMedium)
+if err != nil {
+    log.Fatal(err)
+}
+
+for chunk := range audioChunks {
+    out := make([]float64, r.EstimateOutput(len(chunk)))
+    n, err := r.ProcessInto(chunk, out)
+    if err != nil {
+        log.Fatal(err)
+    }
+    writeOutput(out[:n]) // Only output[:n] is valid
+}
+```
+
+Contract notes:
+
+- `EstimateOutput(len(input))` returns a conservative upper bound for `ProcessInto`.
+- `ProcessInto` returns `ErrBufferTooSmall` if `output` cannot hold results.
+- On `ErrBufferTooSmall`, processing state is not advanced (safe to retry with a larger buffer).
+- Samples beyond `output[:n]` are unspecified and should be ignored.
+
+When using `New(config)`, access `ProcessInto` via type assertion:
+
+```go
+type processIntoResampler interface {
+    ProcessInto(input, output []float64) (int, error)
+    EstimateOutput(inputLen int) int
+}
+
+base, _ := resampling.New(config)
+into, ok := base.(processIntoResampler)
+if !ok {
+    log.Fatal("ProcessInto not available")
+}
+```
+
 ### Convenience Functions
 
 ```go
@@ -321,7 +363,7 @@ config := &resampling.Config{
 | 5.1 Surround (parallel) | ~17.1 ms | ~5.5x vs sequential |
 | 7.1 Surround (parallel) | ~20.0 ms | ~7.0x vs sequential |
 
-_Benchmark: 1 second of audio, 44.1kHz → 48kHz, High quality, Intel i7-1260P_
+Benchmark: 1 second of audio, 44.1kHz → 48kHz, High quality, Intel i7-1260P.
 
 Parallel processing is safe because each channel maintains independent filter state. Mono audio is unaffected (no channels to parallelize).
 
