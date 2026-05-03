@@ -1,0 +1,200 @@
+package resampler
+
+import (
+	"fmt"
+	"math"
+	"testing"
+)
+
+// TestProcessInto_MatchesProcess is a permanent regression test verifying that
+// ProcessInto produces bit-identical output to Process for every common rate
+// pair. This guards against future refactors accidentally diverging the two
+// code paths (analogous to buffer_integrity_test.go for the aliasing contract).
+func TestProcessInto_MatchesProcess(t *testing.T) {
+	ratePairs := []struct {
+		inRate, outRate float64
+		durSeconds      int
+	}{
+		{48000, 16000, 3},  // birdnet-go v2.4 primary (3:1 downsample)
+		{48000, 32000, 3},  // birdnet-go v3.0 (3:2 downsample, 3s)
+		{48000, 32000, 5},  // birdnet-go v3.0 production clip size
+		{44100, 48000, 3},  // CD to DAT
+		{48000, 44100, 3},  // DAT to CD
+		{96000, 48000, 3},  // 2:1 downsample
+		{48000, 96000, 3},  // 1:2 upsample
+		{22050, 16000, 3},  // speech downconversion
+		{16000, 48000, 3},  // speech to standard
+		{44100, 32000, 5},  // CD capture to v3.0 model
+	}
+
+	qualities := []QualityPreset{
+		QualityLow,
+		QualityMedium,
+		QualityHigh,
+	}
+
+	for _, rp := range ratePairs {
+		for _, q := range qualities {
+			name := fmt.Sprintf("%gto%g_%ds_q%d", rp.inRate, rp.outRate, rp.durSeconds, q)
+			t.Run(name, func(t *testing.T) {
+				rProcess, err := NewEngine(rp.inRate, rp.outRate, q)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rInto, err := NewEngine(rp.inRate, rp.outRate, q)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				inputLen := int(rp.inRate) * rp.durSeconds
+				input := make([]float64, inputLen)
+				for i := range input {
+					phase := 2.0 * math.Pi * float64(i) * 440.0 / rp.inRate
+					input[i] = math.Sin(phase + 0.1*math.Sin(2.0*math.Pi*float64(i)/float64(inputLen)))
+				}
+
+				outProcess, err := rProcess.Process(input)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				outBuf := make([]float64, rInto.EstimateOutput(len(input)))
+				n, err := rInto.ProcessInto(input, outBuf)
+				if err != nil {
+					t.Fatal(err)
+				}
+				outInto := outBuf[:n]
+
+				if len(outProcess) != len(outInto) {
+					t.Fatalf("length mismatch: Process=%d, ProcessInto=%d",
+						len(outProcess), len(outInto))
+				}
+
+				for i := range outProcess {
+					if outProcess[i] != outInto[i] {
+						t.Fatalf("sample %d differs: Process=%v, ProcessInto=%v",
+							i, outProcess[i], outInto[i])
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestProcessInto_ZeroAllocs enforces the zero-allocation invariant as a hard
+// test failure. Uses testing.AllocsPerRun to measure steady-state allocations
+// after internal buffers have grown to their final size.
+func TestProcessInto_ZeroAllocs(t *testing.T) {
+	cases := []struct {
+		name            string
+		inRate, outRate float64
+		durSeconds      int
+	}{
+		{"48to16_3s", 48000, 16000, 3},
+		{"48to32_3s", 48000, 32000, 3},
+		{"48to32_5s", 48000, 32000, 5},
+		{"44100to32_5s", 44100, 32000, 5},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := NewEngine(tc.inRate, tc.outRate, QualityMedium)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			inputLen := int(tc.inRate) * tc.durSeconds
+			input := make([]float64, inputLen)
+			for i := range input {
+				input[i] = float64(i) * 1e-5
+			}
+			output := make([]float64, r.EstimateOutput(inputLen))
+
+			// Warm up: let internal buffers grow to steady-state size.
+			r.Reset()
+			if _, err := r.ProcessInto(input, output); err != nil {
+				t.Fatal(err)
+			}
+
+			allocs := testing.AllocsPerRun(100, func() {
+				r.Reset()
+				_, _ = r.ProcessInto(input, output)
+			})
+
+			if allocs != 0 {
+				t.Fatalf("ProcessInto allocated %.0f times per call; expected 0", allocs)
+			}
+		})
+	}
+}
+
+// TestProcessInto_BufferTooSmall verifies that ErrBufferTooSmall is returned
+// when the output buffer is insufficient.
+func TestProcessInto_BufferTooSmall(t *testing.T) {
+	r, err := NewEngine(48000, 96000, QualityMedium) // 2x upsample
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	input := make([]float64, 48000)
+	for i := range input {
+		input[i] = float64(i) * 1e-5
+	}
+
+	tinyOutput := make([]float64, 10) // way too small
+	_, err = r.ProcessInto(input, tinyOutput)
+	if err != ErrBufferTooSmall {
+		t.Fatalf("expected ErrBufferTooSmall, got %v", err)
+	}
+}
+
+// TestProcessInto_MultipleChunks verifies that ProcessInto produces identical
+// output to Process when called with multiple sequential chunks (streaming).
+func TestProcessInto_MultipleChunks(t *testing.T) {
+	rProcess, err := NewEngine(48000, 16000, QualityMedium)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rInto, err := NewEngine(48000, 16000, QualityMedium)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	chunkSize := 4800 // 100ms chunks
+	numChunks := 30   // 3 seconds total
+
+	var allProcess, allInto []float64
+	outBuf := make([]float64, rInto.EstimateOutput(chunkSize))
+
+	for c := range numChunks {
+		chunk := make([]float64, chunkSize)
+		for i := range chunk {
+			sample := c*chunkSize + i
+			chunk[i] = math.Sin(2.0 * math.Pi * 440.0 * float64(sample) / 48000.0)
+		}
+
+		out, err := rProcess.Process(chunk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		allProcess = append(allProcess, out...)
+
+		n, err := rInto.ProcessInto(chunk, outBuf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		allInto = append(allInto, outBuf[:n]...)
+	}
+
+	if len(allProcess) != len(allInto) {
+		t.Fatalf("streaming length mismatch: Process=%d, ProcessInto=%d",
+			len(allProcess), len(allInto))
+	}
+
+	for i := range allProcess {
+		if allProcess[i] != allInto[i] {
+			t.Fatalf("streaming sample %d differs: Process=%v, ProcessInto=%v",
+				i, allProcess[i], allInto[i])
+		}
+	}
+}

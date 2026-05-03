@@ -133,6 +133,29 @@ func (r *SimpleResampler) Process(input []float64) ([]float64, error) {
 	return r.engine.Process(input)
 }
 
+// ProcessInto resamples input into the caller-provided output buffer.
+// Returns the number of output samples written. The returned slice aliases
+// internal buffers only while zero-copy is active; the output is written
+// directly into the provided buffer. Returns ErrBufferTooSmall if output
+// cannot hold all produced samples.
+func (r *SimpleResampler) ProcessInto(input, output []float64) (int, error) {
+	result, err := r.engine.ProcessZeroCopy(input)
+	if err != nil {
+		return 0, err
+	}
+	if len(output) < len(result) {
+		return 0, ErrBufferTooSmall
+	}
+	copy(output, result)
+	return len(result), nil
+}
+
+// EstimateOutput returns the maximum number of output samples that
+// processing inputLen input samples may produce.
+func (r *SimpleResampler) EstimateOutput(inputLen int) int {
+	return int(float64(inputLen)*r.engine.GetRatio()) + 64
+}
+
 // Flush returns any remaining buffered samples.
 func (r *SimpleResampler) Flush() ([]float64, error) {
 	return r.engine.Flush()

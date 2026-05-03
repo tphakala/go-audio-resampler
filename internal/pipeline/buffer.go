@@ -107,6 +107,32 @@ func (b *RingBuffer) Peek(n int) []float64 {
 	return result
 }
 
+// ReadInto copies up to len(dst) samples into the caller-provided buffer,
+// consuming them from the ring. Returns the number of samples read.
+func (b *RingBuffer) ReadInto(dst []float64) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	n := len(dst)
+	if n > b.size {
+		n = b.size
+	}
+	if n <= 0 {
+		return 0
+	}
+
+	firstChunk := b.capacity - b.readPos
+	if firstChunk >= n {
+		copy(dst[:n], b.data[b.readPos:b.readPos+n])
+	} else {
+		copy(dst[:firstChunk], b.data[b.readPos:b.readPos+firstChunk])
+		copy(dst[firstChunk:n], b.data[:n-firstChunk])
+	}
+	b.readPos = (b.readPos + n) % b.capacity
+	b.size -= n
+	return n
+}
+
 // ReadAll retrieves all available samples from the buffer.
 func (b *RingBuffer) ReadAll() []float64 {
 	return b.Read(b.size)

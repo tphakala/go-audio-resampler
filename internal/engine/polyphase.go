@@ -225,6 +225,51 @@ func (r *Resampler[F]) Process(input []F) ([]F, error) {
 	return output, nil
 }
 
+// ProcessZeroCopy resamples input using the zero-copy internal path.
+// The returned slice aliases internal buffers and is only valid until the
+// next Process, ProcessZeroCopy, or Flush call.
+func (r *Resampler[F]) ProcessZeroCopy(input []F) ([]F, error) {
+	if len(input) == 0 {
+		return []F{}, nil
+	}
+
+	r.samplesIn += int64(len(input))
+
+	if r.cubicStage != nil {
+		output, err := r.cubicStage.Process(input)
+		if err != nil {
+			return nil, fmt.Errorf("cubic stage processing failed: %w", err)
+		}
+		r.samplesOut += int64(len(output))
+		return output, nil
+	}
+
+	intermediate := input
+	var err error
+	if r.preStage != nil {
+		intermediate, err = r.preStage.processZeroCopy(input)
+		if err != nil {
+			return nil, fmt.Errorf("pre-stage processing failed: %w", err)
+		}
+	}
+
+	output := intermediate
+	if r.decimationStage != nil {
+		output, err = r.decimationStage.processZeroCopy(intermediate)
+		if err != nil {
+			return nil, fmt.Errorf("decimation stage processing failed: %w", err)
+		}
+	} else if r.polyphaseStage != nil {
+		output, err = r.polyphaseStage.processZeroCopy(intermediate)
+		if err != nil {
+			return nil, fmt.Errorf("polyphase stage processing failed: %w", err)
+		}
+	}
+
+	r.samplesOut += int64(len(output))
+	return output, nil
+}
+
 // Flush returns any remaining buffered samples.
 func (r *Resampler[F]) Flush() ([]F, error) {
 	// QualityQuick cubic stage doesn't buffer
@@ -627,18 +672,20 @@ func NewDFTStage[F simdops.Float](factor int, quality Quality) (*DFTStage[F], er
 // Process upsamples the input using polyphase FIR filtering.
 // Uses polyphase decomposition to avoid multiplying by zeros.
 // Optimized for cache efficiency: processes in L2-sized chunks for large inputs.
-func (s *DFTStage[F]) Process(input []F) ([]F, error) {
+// processZeroCopy is the allocation-free internal path. The returned slice
+// aliases s.outputBuf and is only valid until the next call to processZeroCopy,
+// Process, or Flush. Pipeline-internal callers that consume the output
+// immediately (e.g. writing it into the next stage's buffer) should use this
+// to avoid a defensive copy.
+func (s *DFTStage[F]) processZeroCopy(input []F) ([]F, error) {
 	if s.factor == 1 {
-		// Pass-through
 		return input, nil
 	}
 
-	inputLen := len(input)
-	if inputLen == 0 {
+	if len(input) == 0 {
 		return []F{}, nil
 	}
 
-	// Append input to history (no zero-insertion needed!)
 	s.history = append(s.history, input...)
 
 	numAvailable := len(s.history)
@@ -646,12 +693,9 @@ func (s *DFTStage[F]) Process(input []F) ([]F, error) {
 		return []F{}, nil
 	}
 
-	// Number of input samples we can fully process
 	numInputProcessable := numAvailable - s.tapsPerPhase + 1
-	// Each input sample produces 'factor' output samples
 	numOutput := numInputProcessable * s.factor
 
-	// Reuse output buffer to reduce allocations
 	if cap(s.outputBuf) < numOutput {
 		s.outputBuf = make([]F, numOutput)
 	} else {
@@ -663,23 +707,30 @@ func (s *DFTStage[F]) Process(input []F) ([]F, error) {
 	output := s.outputBuf
 	tapsPerPhase := s.tapsPerPhase
 
-	// For small inputs, use simple non-chunked path (less overhead)
 	if numInputProcessable <= l2CacheChunkSize {
 		s.processChunk(history, output, numInputProcessable, factor, tapsPerPhase)
 	} else {
-		// Large input: process in L2-cache-friendly chunks
-		// This keeps working set in L2 cache for better performance
 		s.processChunked(history, output, numInputProcessable, factor, tapsPerPhase)
 	}
 
-	// Shift history - keep only unprocessed samples
 	if numInputProcessable > 0 {
 		copy(s.history, s.history[numInputProcessable:])
 		s.history = s.history[:numAvailable-numInputProcessable]
 	}
 
-	// Return a copy to prevent caller's slice from being corrupted
-	// if they call Process() or Flush() again (which reuses s.outputBuf)
+	return s.outputBuf[:numOutput], nil
+}
+
+// Process resamples input through the DFT upsampling stage. The returned
+// slice is owned by the caller and remains valid across subsequent calls.
+func (s *DFTStage[F]) Process(input []F) ([]F, error) {
+	output, err := s.processZeroCopy(input)
+	if err != nil || len(output) == 0 {
+		return output, err
+	}
+	if s.factor == 1 {
+		return output, nil
+	}
 	result := make([]F, len(output))
 	copy(result, output)
 	return result, nil
@@ -945,9 +996,10 @@ func NewDFTDecimationStage[F simdops.Float](factor int, quality Quality) (*DFTDe
 //   - If this position aligns with decimation phase, output the sample
 //
 // 3. Advance decimation phase
-func (s *DFTDecimationStage[F]) Process(input []F) ([]F, error) {
+// processZeroCopy is the allocation-free internal path. The returned slice
+// aliases s.outputBuf and is only valid until the next call.
+func (s *DFTDecimationStage[F]) processZeroCopy(input []F) ([]F, error) {
 	if s.factor == 1 {
-		// Pass-through
 		return input, nil
 	}
 
@@ -955,7 +1007,6 @@ func (s *DFTDecimationStage[F]) Process(input []F) ([]F, error) {
 		return []F{}, nil
 	}
 
-	// Append input to history
 	s.history = append(s.history, input...)
 
 	numAvailable := len(s.history)
@@ -963,11 +1014,8 @@ func (s *DFTDecimationStage[F]) Process(input []F) ([]F, error) {
 		return []F{}, nil
 	}
 
-	// Number of input positions we can compute filtered output for
 	numFilterable := numAvailable - s.numTaps + 1
 
-	// Calculate how many decimated outputs we'll produce
-	// Starting from decimPhase, we output every 'factor'-th filtered sample
 	numOutput := 0
 	for i := s.decimPhase; i < numFilterable; i += s.factor {
 		numOutput++
@@ -977,36 +1025,23 @@ func (s *DFTDecimationStage[F]) Process(input []F) ([]F, error) {
 		return []F{}, nil
 	}
 
-	// Allocate output buffer
 	if cap(s.outputBuf) < numOutput {
 		s.outputBuf = make([]F, numOutput)
 	} else {
 		s.outputBuf = s.outputBuf[:numOutput]
 	}
 
-	// Filter and decimate
 	outIdx := 0
 	for pos := s.decimPhase; pos < numFilterable && outIdx < numOutput; pos += s.factor {
-		// Compute FIR filter output at this position
-		// Coefficients are reversed, so we can use direct dot product
 		var sum F
 		histSlice := s.history[pos : pos+s.numTaps]
-
-		// Use SIMD dot product (always available)
 		sum = s.ops.DotProductUnsafe(histSlice, s.coeffs)
-
 		s.outputBuf[outIdx] = sum
 		outIdx++
 	}
 
-	// Update decimation phase for next call
-	// The phase represents the offset into the decimation cycle. After consuming
-	// numFilterable samples, the buffer shifts and the new phase becomes
-	// (oldPhase - consumed) mod factor. We use (x%f+f)%f to handle Go's
-	// negative modulo behavior (Go returns negative for negative dividend).
 	s.decimPhase = ((s.decimPhase-numFilterable)%s.factor + s.factor) % s.factor
 
-	// Shift history - keep only what we need for next call
 	consumed := numFilterable
 	if consumed > 0 {
 		remaining := len(s.history) - consumed
@@ -1016,12 +1051,21 @@ func (s *DFTDecimationStage[F]) Process(input []F) ([]F, error) {
 		s.history = s.history[:remaining]
 	}
 
-	// IMPORTANT: Return a COPY of the output, not a slice of the internal buffer.
-	// Returning s.outputBuf directly would cause buffer corruption on the next
-	// Process() call, as the caller's slice would share the same backing array.
-	// This was the cause of TestResampler_BufferIntegrity failures for 96→48.
-	result := make([]F, outIdx)
-	copy(result, s.outputBuf[:outIdx])
+	return s.outputBuf[:outIdx], nil
+}
+
+// Process resamples input through the DFT decimation stage. The returned
+// slice is owned by the caller and remains valid across subsequent calls.
+func (s *DFTDecimationStage[F]) Process(input []F) ([]F, error) {
+	output, err := s.processZeroCopy(input)
+	if err != nil || len(output) == 0 {
+		return output, err
+	}
+	if s.factor == 1 {
+		return output, nil
+	}
+	result := make([]F, len(output))
+	copy(result, output)
 	return result, nil
 }
 
@@ -1217,14 +1261,15 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 //	}
 //
 // The cubic interpolation formula per coefficient: coef(x) = a + x*(b + x*(c + x*d))
-func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
+// processZeroCopy is the allocation-free internal path. The returned slice
+// aliases s.outputBuf and is only valid until the next call.
+func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) {
 	if len(input) == 0 {
 		return []F{}, nil
 	}
 
 	s.samplesIn += int64(len(input))
 
-	// Append input to history
 	s.history = append(s.history, input...)
 
 	numIn := len(s.history) - s.tapsPerPhase + 1
@@ -1232,9 +1277,6 @@ func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
 		return []F{}, nil
 	}
 
-	// Calculate number of output samples
-	// at is in fixed-point: integer_phase * (1 << phaseFracBits) + fractional
-	// limit = numIn * numPhases * (1 << phaseFracBits)
 	numPhases64 := int64(s.numPhases)
 	phaseFracBits := s.phaseFracBits
 	limit := int64(numIn) * numPhases64 << phaseFracBits
@@ -1243,14 +1285,12 @@ func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
 		return []F{}, nil
 	}
 
-	// Reuse output buffer to reduce allocations
 	if cap(s.outputBuf) < numOut {
 		s.outputBuf = make([]F, numOut)
 	} else {
 		s.outputBuf = s.outputBuf[:numOut]
 	}
 
-	// Hoist invariants out of the loop for better optimization
 	polyCoeffs := s.polyCoeffs
 	polyCoeffsB := s.polyCoeffsB
 	polyCoeffsC := s.polyCoeffsC
@@ -1262,28 +1302,21 @@ func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
 	histLen := len(history)
 	phaseFracMask := s.phaseFracMask
 
-	// Precompute scale factor for converting fractional bits to [0, 1)
 	fracScale := F(1.0 / float64(int64(1)<<phaseFracBits))
 
-	// Main resampling loop with cubic coefficient interpolation
 	at := s.at
 	outIdx := 0
 	for at < limit {
-		// Extract integer phase and fractional sub-phase from fixed-point accumulator
-		// at = (input_sample * numPhases + integer_phase) << phaseFracBits + frac
-		fullPhase := at >> phaseFracBits      // input_sample * numPhases + integer_phase
-		div := int(fullPhase / numPhases64)   // Input sample index
-		phase := int(fullPhase % numPhases64) // Integer phase index (0 to numPhases-1)
-		frac := at & phaseFracMask            // Fractional phase (0 to phaseFracMask)
-		x := F(frac) * fracScale              // Fractional phase normalized to [0, 1)
+		fullPhase := at >> phaseFracBits
+		div := int(fullPhase / numPhases64)
+		phase := int(fullPhase % numPhases64)
+		frac := at & phaseFracMask
+		x := F(frac) * fracScale
 
-		// Boundary check
 		if div+tapsPerPhase > histLen {
 			break
 		}
 
-		// Convolve with cubic coefficient interpolation using SIMD
-		// Computes: sum = Σ hist[i] * (a[i] + x*(b[i] + x*(c[i] + x*d[i])))
 		coeffsA := polyCoeffs[phase]
 		coeffsB := polyCoeffsB[phase]
 		coeffsC := polyCoeffsC[phase]
@@ -1297,23 +1330,28 @@ func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
 		at += step
 	}
 
-	// Trim output to actual size produced
 	output := s.outputBuf[:outIdx]
 
-	// Consume processed samples from history
 	consumed := int(at>>phaseFracBits) / numPhases
 	if consumed > 0 && consumed <= histLen {
 		copy(s.history, s.history[consumed:])
 		s.history = s.history[:histLen-consumed]
 	}
 
-	// Save remainder for next call
-	// Keep the fractional part within one input sample
 	s.at = at - int64(consumed*numPhases)<<phaseFracBits
 
 	s.samplesOut += int64(len(output))
 
-	// Return a copy to prevent caller's slice from being corrupted
+	return output, nil
+}
+
+// Process resamples input through the polyphase stage. The returned
+// slice is owned by the caller and remains valid across subsequent calls.
+func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
+	output, err := s.processZeroCopy(input)
+	if err != nil || len(output) == 0 {
+		return output, err
+	}
 	result := make([]F, len(output))
 	copy(result, output)
 	return result, nil

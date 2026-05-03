@@ -42,6 +42,13 @@ type Stage interface {
 	GetSIMDInfo() string
 }
 
+// ZeroCopyProcessor is an optional interface that stages can implement to
+// support allocation-free processing. The returned slice aliases internal
+// buffers and is only valid until the next ProcessZeroCopy or Process call.
+type ZeroCopyProcessor interface {
+	ProcessZeroCopy(input []float64) ([]float64, error)
+}
+
 // StageType identifies the type of processing stage.
 type StageType int
 
