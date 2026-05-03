@@ -355,6 +355,17 @@ func TestEstimateOutput_UpperBound_NewEngine(t *testing.T) {
 				if n != len(expected) {
 					t.Fatalf("length mismatch at iteration %d: Process=%d ProcessInto=%d", i, len(expected), n)
 				}
+				for sampleIdx := range expected {
+					if output[sampleIdx] != expected[sampleIdx] {
+						t.Fatalf(
+							"sample mismatch at iteration %d sample %d: Process=%v ProcessInto=%v",
+							i,
+							sampleIdx,
+							expected[sampleIdx],
+							output[sampleIdx],
+						)
+					}
+				}
 			}
 		})
 	}

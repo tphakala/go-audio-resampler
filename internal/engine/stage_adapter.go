@@ -120,10 +120,12 @@ func (s *StageAdapter[F]) GetSIMDInfo() string {
 	return cpu.Info()
 }
 
-// ProcessZeroCopy processes input without defensive copies. The returned
-// slice aliases internal buffers and is only valid until the next call.
-// This method is implemented only for StageAdapter[float64]; calling it on
-// a float32 adapter will fall back to the allocating Process path.
+// ProcessZeroCopy processes input with zero-copy semantics on the float64 path.
+// For StageAdapter[float64], the returned slice aliases internal buffers and is
+// only valid until the next processing call.
+//
+// For non-float64 adapters, this method falls back to conversion plus the
+// allocating Process path and returns an owned []float64 copy.
 func (s *StageAdapter[F]) ProcessZeroCopy(input []float64) ([]float64, error) {
 	r, ok := any(s.Resampler).(*Resampler[float64])
 	if ok {
