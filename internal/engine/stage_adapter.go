@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"github.com/tphakala/go-audio-resampler/internal/pipeline"
 	"github.com/tphakala/go-audio-resampler/internal/simdops"
 	"github.com/tphakala/simd/cpu"
 )
@@ -118,3 +119,33 @@ func (s *StageAdapter[F]) GetPhases() int {
 func (s *StageAdapter[F]) GetSIMDInfo() string {
 	return cpu.Info()
 }
+
+// ProcessZeroCopy processes input with zero-copy semantics on the float64 path.
+// For StageAdapter[float64], the returned slice aliases internal buffers and is
+// only valid until the next processing call.
+//
+// For non-float64 adapters, this method falls back to conversion plus the
+// allocating Process path and returns an owned []float64 copy.
+func (s *StageAdapter[F]) ProcessZeroCopy(input []float64) ([]float64, error) {
+	r, ok := any(s.Resampler).(*Resampler[float64])
+	if ok {
+		return r.ProcessZeroCopy(input)
+	}
+
+	// float32 adapter fallback: convert input/output types and use allocating path.
+	typedInput := make([]F, len(input))
+	for i, sample := range input {
+		typedInput[i] = F(sample)
+	}
+	typedOutput, err := s.Resampler.Process(typedInput)
+	if err != nil {
+		return nil, err
+	}
+	output := make([]float64, len(typedOutput))
+	for i, sample := range typedOutput {
+		output[i] = float64(sample)
+	}
+	return output, nil
+}
+
+var _ pipeline.ZeroCopyProcessor = (*StageAdapter[float64])(nil)

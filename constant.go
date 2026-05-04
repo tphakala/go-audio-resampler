@@ -3,6 +3,8 @@ package resampler
 import (
 	"fmt"
 	"sync"
+
+	pipelinepkg "github.com/tphakala/go-audio-resampler/internal/pipeline"
 )
 
 // constantRateResampler implements fixed-ratio resampling.
@@ -24,6 +26,9 @@ type constantRateResampler struct {
 type channelResampler struct {
 	stages  []Stage
 	buffers []*RingBuffer
+
+	// Pre-allocated scratch buffer reused by ReadInto to avoid allocations.
+	readScratch []float64
 }
 
 // newConstantRateResampler creates a new constant-rate resampler.
@@ -80,6 +85,30 @@ func (r *constantRateResampler) Process(input []float64) ([]float64, error) {
 
 	// Use first channel for mono processing
 	return r.processChannel(0, input)
+}
+
+// ProcessInto resamples input into the caller-provided output buffer.
+// It writes up to len(output) samples and returns the number of valid samples;
+// callers should consume output[:n]. The buffer tail beyond n is undefined.
+//
+// If output is too small, ProcessInto returns ErrBufferTooSmall before any
+// processing state is advanced, so callers can retry with a larger buffer.
+func (r *constantRateResampler) ProcessInto(input, output []float64) (int, error) {
+	if len(r.channels) == 0 {
+		return 0, fmt.Errorf("no channels initialized")
+	}
+	if len(output) < r.EstimateOutput(len(input)) {
+		return 0, ErrBufferTooSmall
+	}
+
+	return r.processChannelInto(0, input, output)
+}
+
+// EstimateOutput returns the maximum number of output samples that
+// processing inputLen input samples may produce. Callers should allocate
+// output buffers of at least this size for ProcessInto.
+func (r *constantRateResampler) EstimateOutput(inputLen int) int {
+	return int(float64(inputLen)*r.ratio) + estimateOutputMargin
 }
 
 // ProcessFloat32 resamples float32 audio data.
@@ -197,6 +226,57 @@ func (r *constantRateResampler) processChannel(channel int, input []float64) ([]
 	// Read final output
 	finalBuffer := ch.buffers[len(ch.buffers)-1]
 	return finalBuffer.ReadAll(), nil
+}
+
+// processChannelInto processes a single channel through the pipeline using the
+// zero-copy path when available, and writes the output into dst. Returns the
+// number of samples written.
+func (r *constantRateResampler) processChannelInto(channel int, input, dst []float64) (int, error) {
+	if channel >= len(r.channels) {
+		return 0, fmt.Errorf("channel %d out of range", channel)
+	}
+
+	ch := r.channels[channel]
+
+	ch.buffers[0].Write(input)
+
+	for i, stage := range ch.stages {
+		inputBuffer := ch.buffers[i]
+		outputBuffer := ch.buffers[i+1]
+
+		zcStage, hasZC := stage.(pipelinepkg.ZeroCopyProcessor)
+
+		for inputBuffer.Available() >= stage.GetMinInput() {
+			avail := inputBuffer.Available()
+			if cap(ch.readScratch) < avail {
+				ch.readScratch = make([]float64, avail)
+			} else {
+				ch.readScratch = ch.readScratch[:avail]
+			}
+			n := inputBuffer.ReadInto(ch.readScratch)
+			chunk := ch.readScratch[:n]
+
+			var output []float64
+			var err error
+			if hasZC {
+				output, err = zcStage.ProcessZeroCopy(chunk)
+			} else {
+				output, err = stage.Process(chunk)
+			}
+			if err != nil {
+				return 0, fmt.Errorf("stage %d processing error: %w", i, err)
+			}
+
+			outputBuffer.Write(output)
+		}
+	}
+
+	finalBuffer := ch.buffers[len(ch.buffers)-1]
+	if finalBuffer.Available() > len(dst) {
+		panic("go-audio-resampler: EstimateOutput underestimated actual output length")
+	}
+	n := finalBuffer.ReadInto(dst)
+	return n, nil
 }
 
 // Flush returns any remaining samples.
