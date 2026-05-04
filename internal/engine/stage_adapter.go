@@ -137,7 +137,7 @@ func (s *StageAdapter[F]) ProcessZeroCopy(input []float64) ([]float64, error) {
 	for i, sample := range input {
 		typedInput[i] = F(sample)
 	}
-	typedOutput, err := s.Resampler.Process(typedInput)
+	typedOutput, err := s.Resampler.Process(typedInput) //nolint:staticcheck // explicit embedded field for clarity
 	if err != nil {
 		return nil, err
 	}

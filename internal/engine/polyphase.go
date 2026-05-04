@@ -178,7 +178,7 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 }
 
 // Process resamples the input samples.
-func (r *Resampler[F]) Process(input []F) ([]F, error) {
+func (r *Resampler[F]) Process(input []F) ([]F, error) { //nolint:dupl // intentional parallel structure with ProcessZeroCopy
 	if len(input) == 0 {
 		return []F{}, nil
 	}
@@ -228,7 +228,7 @@ func (r *Resampler[F]) Process(input []F) ([]F, error) {
 // ProcessZeroCopy resamples input using the zero-copy internal path.
 // The returned slice aliases internal buffers and is only valid until the
 // next Process, ProcessZeroCopy, or Flush call.
-func (r *Resampler[F]) ProcessZeroCopy(input []F) ([]F, error) {
+func (r *Resampler[F]) ProcessZeroCopy(input []F) ([]F, error) { //nolint:dupl // intentional parallel structure with Process
 	if len(input) == 0 {
 		return []F{}, nil
 	}
@@ -677,7 +677,7 @@ func NewDFTStage[F simdops.Float](factor int, quality Quality) (*DFTStage[F], er
 // Process, or Flush. Pipeline-internal callers that consume the output
 // immediately (e.g. writing it into the next stage's buffer) should use this
 // to avoid a defensive copy.
-func (s *DFTStage[F]) processZeroCopy(input []F) ([]F, error) {
+func (s *DFTStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:unparam // error kept for symmetry with Process
 	if s.factor == 1 {
 		// Pass-through
 		return input, nil
@@ -1009,7 +1009,7 @@ func NewDFTDecimationStage[F simdops.Float](factor int, quality Quality) (*DFTDe
 // 3. Advance decimation phase
 // processZeroCopy is the allocation-free internal path. The returned slice
 // aliases s.outputBuf and is only valid until the next call.
-func (s *DFTDecimationStage[F]) processZeroCopy(input []F) ([]F, error) {
+func (s *DFTDecimationStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:unparam // error kept for symmetry with Process
 	if s.factor == 1 {
 		// Pass-through
 		return input, nil
@@ -1294,7 +1294,7 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 // The cubic interpolation formula per coefficient: coef(x) = a + x*(b + x*(c + x*d))
 // processZeroCopy is the allocation-free internal path. The returned slice
 // aliases s.outputBuf and is only valid until the next call.
-func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) {
+func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:unparam // error kept for symmetry with Process
 	if len(input) == 0 {
 		return []F{}, nil
 	}
