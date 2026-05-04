@@ -52,6 +52,7 @@ const (
 	defaultBufferSize    = 8192 // Default ring buffer size in samples
 	bytesPerFloat64      = 8    // Size of float64 in bytes
 	bufferSizeMultiplier = 2    // Multiplier for buffer size based on input size
+	estimateOutputMargin = 64   // Extra samples for filter ramp-up/ramp-down in EstimateOutput
 )
 
 // Stage processing constants

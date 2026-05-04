@@ -149,9 +149,8 @@ func (r *SimpleResampler) ProcessInto(input, output []float64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	// Guard against future EstimateOutput regressions.
 	if len(output) < len(result) {
-		return 0, ErrBufferTooSmall
+		panic("go-audio-resampler: EstimateOutput underestimated actual output length")
 	}
 	copy(output, result)
 	return len(result), nil
@@ -160,7 +159,7 @@ func (r *SimpleResampler) ProcessInto(input, output []float64) (int, error) {
 // EstimateOutput returns the maximum number of output samples that
 // processing inputLen input samples may produce.
 func (r *SimpleResampler) EstimateOutput(inputLen int) int {
-	return int(float64(inputLen)*r.engine.GetRatio()) + 64
+	return int(float64(inputLen)*r.engine.GetRatio()) + estimateOutputMargin
 }
 
 // Flush returns any remaining buffered samples.

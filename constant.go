@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/tphakala/go-audio-resampler/internal/pipeline"
+	pipelinepkg "github.com/tphakala/go-audio-resampler/internal/pipeline"
 )
 
 // constantRateResampler implements fixed-ratio resampling.
@@ -108,8 +108,7 @@ func (r *constantRateResampler) ProcessInto(input, output []float64) (int, error
 // processing inputLen input samples may produce. Callers should allocate
 // output buffers of at least this size for ProcessInto.
 func (r *constantRateResampler) EstimateOutput(inputLen int) int {
-	// Add a small margin for filter ramp-up/ramp-down effects.
-	return int(float64(inputLen)*r.ratio) + 64
+	return int(float64(inputLen)*r.ratio) + estimateOutputMargin
 }
 
 // ProcessFloat32 resamples float32 audio data.
@@ -245,7 +244,7 @@ func (r *constantRateResampler) processChannelInto(channel int, input, dst []flo
 		inputBuffer := ch.buffers[i]
 		outputBuffer := ch.buffers[i+1]
 
-		zcStage, hasZC := stage.(pipeline.ZeroCopyProcessor)
+		zcStage, hasZC := stage.(pipelinepkg.ZeroCopyProcessor)
 
 		for inputBuffer.Available() >= stage.GetMinInput() {
 			avail := inputBuffer.Available()
@@ -274,7 +273,7 @@ func (r *constantRateResampler) processChannelInto(channel int, input, dst []flo
 
 	finalBuffer := ch.buffers[len(ch.buffers)-1]
 	if finalBuffer.Available() > len(dst) {
-		return 0, ErrBufferTooSmall
+		panic("go-audio-resampler: EstimateOutput underestimated actual output length")
 	}
 	n := finalBuffer.ReadInto(dst)
 	return n, nil

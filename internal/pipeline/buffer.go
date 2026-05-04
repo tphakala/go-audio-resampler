@@ -113,10 +113,7 @@ func (b *RingBuffer) ReadInto(dst []float64) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	n := len(dst)
-	if n > b.size {
-		n = b.size
-	}
+	n := min(len(dst), b.size)
 	if n <= 0 {
 		return 0
 	}

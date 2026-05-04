@@ -1,6 +1,7 @@
 package resampler
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -162,7 +163,7 @@ func TestProcessInto_BufferTooSmall(t *testing.T) {
 
 	tinyOutput := make([]float64, 10) // way too small
 	_, err = r.ProcessInto(input, tinyOutput)
-	if err != ErrBufferTooSmall {
+	if !errors.Is(err, ErrBufferTooSmall) {
 		t.Fatalf("expected ErrBufferTooSmall, got %v", err)
 	}
 }
@@ -198,7 +199,7 @@ func TestProcessInto_BufferTooSmallDoesNotAdvanceState(t *testing.T) {
 
 	tinyBuf := make([]float64, 1)
 	_, err = retryResampler.ProcessInto(input, tinyBuf)
-	if err != ErrBufferTooSmall {
+	if !errors.Is(err, ErrBufferTooSmall) {
 		t.Fatalf("expected ErrBufferTooSmall on first attempt, got %v", err)
 	}
 
@@ -244,7 +245,7 @@ func TestProcessInto_BufferTooSmall_NewPath(t *testing.T) {
 
 	tinyOutput := make([]float64, 1)
 	_, err = processIntoR.ProcessInto(input, tinyOutput)
-	if err != ErrBufferTooSmall {
+	if !errors.Is(err, ErrBufferTooSmall) {
 		t.Fatalf("expected ErrBufferTooSmall, got %v", err)
 	}
 }
@@ -264,7 +265,9 @@ func TestProcessInto_MultipleChunks(t *testing.T) {
 	chunkSize := 4800 // 100ms chunks
 	numChunks := 30   // 3 seconds total
 
-	var allProcess, allInto []float64
+	estimatedTotal := rInto.EstimateOutput(chunkSize) * numChunks
+	allProcess := make([]float64, 0, estimatedTotal)
+	allInto := make([]float64, 0, estimatedTotal)
 	outBuf := make([]float64, rInto.EstimateOutput(chunkSize))
 
 	for c := range numChunks {
