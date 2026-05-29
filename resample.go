@@ -24,6 +24,8 @@ type Resampler interface {
 
 	// Flush returns any remaining samples in internal buffers.
 	// Should be called when no more input will be provided.
+	// For multi-channel streams processed via ProcessMulti, use the
+	// MultiFlusher interface instead to drain every channel.
 	Flush() ([]float64, error)
 
 	// GetLatency returns the resampler latency in samples.
@@ -308,6 +310,19 @@ type Info struct {
 
 	// SIMDType describes the SIMD instruction set in use.
 	SIMDType string
+}
+
+// MultiFlusher is an optional interface for resamplers that support
+// multi-channel flushing. Use a type assertion to check support:
+//
+//	if mf, ok := r.(MultiFlusher); ok {
+//	    channels, err := mf.FlushMulti()
+//	}
+type MultiFlusher interface {
+	// FlushMulti returns any remaining samples in internal buffers for
+	// every channel. Should be called instead of Flush when using
+	// ProcessMulti with multi-channel streams.
+	FlushMulti() ([][]float64, error)
 }
 
 // infoProvider is an optional interface for resamplers that can provide detailed info.
