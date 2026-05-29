@@ -277,6 +277,7 @@ figures come from the bundled quality-regression suite and are reproducible with
 
 - **High and VeryHigh presets match or exceed libsoxr quality**, within 0.5 dB (High slightly better, VeryHigh essentially identical)
 - **Low and Medium track libsoxr closely**: Medium is within ~1 dB and Low within ~4 dB, trading a little stopband headroom for lower passband ripple
+- All presets achieve SNR (Signal-to-Noise Ratio) matching libsoxr within measurement tolerance
 - Downsampling (e.g., 48kHz → 32kHz) shows substantially better THD (below -190 dB across presets) thanks to the anti-aliasing filters
 
 ### Custom Quality Settings
