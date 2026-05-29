@@ -35,16 +35,16 @@ func TestProcessInto_MatchesProcess(t *testing.T) {
 		inRate, outRate float64
 		durSeconds      int
 	}{
-		{48000, 16000, 3},  // birdnet-go v2.4 primary (3:1 downsample)
-		{48000, 32000, 3},  // birdnet-go v3.0 (3:2 downsample, 3s)
-		{48000, 32000, 5},  // birdnet-go v3.0 production clip size
-		{44100, 48000, 3},  // CD to DAT
-		{48000, 44100, 3},  // DAT to CD
-		{96000, 48000, 3},  // 2:1 downsample
-		{48000, 96000, 3},  // 1:2 upsample
-		{22050, 16000, 3},  // speech downconversion
-		{16000, 48000, 3},  // speech to standard
-		{44100, 32000, 5},  // CD capture to v3.0 model
+		{48000, 16000, 3}, // birdnet-go v2.4 primary (3:1 downsample)
+		{48000, 32000, 3}, // birdnet-go v3.0 (3:2 downsample, 3s)
+		{48000, 32000, 5}, // birdnet-go v3.0 production clip size
+		{44100, 48000, 3}, // CD to DAT
+		{48000, 44100, 3}, // DAT to CD
+		{96000, 48000, 3}, // 2:1 downsample
+		{48000, 96000, 3}, // 1:2 upsample
+		{22050, 16000, 3}, // speech downconversion
+		{16000, 48000, 3}, // speech to standard
+		{44100, 32000, 5}, // CD capture to v3.0 model
 	}
 
 	qualities := []QualityPreset{
@@ -547,5 +547,69 @@ func TestProcessFloat32Into_ZeroAllocs(t *testing.T) {
 				t.Fatalf("ProcessFloat32Into allocated %.0f times per call; expected 0", allocs)
 			}
 		})
+	}
+}
+
+// TestNewPath_ProcessInto_MatchesProcess is a permanent regression test verifying
+// that on the New(config) path (constantRateResampler), ProcessInto produces
+// bit-identical output to Process across common rate pairs and qualities. Process
+// drives processChannel and ProcessInto drives processChannelInto; the two read
+// the staged input buffers with different granularity but must agree
+// sample-for-sample.
+func TestNewPath_ProcessInto_MatchesProcess(t *testing.T) {
+	ratePairs := []struct {
+		inRate, outRate float64
+		durSeconds      int
+	}{
+		{48000, 16000, 3},
+		{48000, 32000, 3},
+		{44100, 48000, 3},
+		{48000, 44100, 3},
+		{96000, 48000, 3},
+		{16000, 48000, 3},
+		{22050, 16000, 3},
+	}
+	qualities := []QualityPreset{QualityLow, QualityMedium, QualityHigh}
+
+	for idx, rp := range ratePairs {
+		for _, q := range qualities {
+			t.Run(fmt.Sprintf("%gto%g_q%d", rp.inRate, rp.outRate, q), func(t *testing.T) {
+				cfg := &Config{
+					InputRate:  rp.inRate,
+					OutputRate: rp.outRate,
+					Channels:   1,
+					Quality:    QualitySpec{Preset: q},
+				}
+
+				rProcess, err := New(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rIntoRaw, err := New(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rInto, ok := rIntoRaw.(processIntoResampler)
+				if !ok {
+					t.Fatal("New(...) result does not implement ProcessInto")
+				}
+
+				rng := rand.New(rand.NewSource(4242 + int64(idx)))
+				input := makeDeterministicInput(rng, int(rp.inRate)*rp.durSeconds, rp.inRate)
+
+				outProcess, err := rProcess.Process(input)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				outBuf := make([]float64, rInto.EstimateOutput(len(input)))
+				n, err := rInto.ProcessInto(input, outBuf)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				assertSamplesEqual(t, "process-vs-into", outBuf[:n], outProcess)
+			})
+		}
 	}
 }
