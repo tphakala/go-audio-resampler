@@ -264,18 +264,20 @@ The following THD (Total Harmonic Distortion) measurements compare this library 
 
 | Preset   | libsoxr THD | Go THD     | Difference |
 | -------- | ----------- | ---------- | ---------- |
-| Low      | -146.25 dB  | -145.17 dB | +1.1 dB    |
-| Medium   | -130.61 dB  | -145.17 dB | -14.6 dB ✓ |
-| High     | -155.19 dB  | -156.73 dB | -1.5 dB ✓  |
+| Low      | -146.25 dB  | -142.28 dB | +4.0 dB    |
+| Medium   | -130.61 dB  | -129.79 dB | +0.8 dB    |
+| High     | -155.19 dB  | -155.58 dB | -0.4 dB ✓  |
 | VeryHigh | -162.22 dB  | -162.19 dB | +0.03 dB   |
 
-_Negative difference means Go implementation has better THD (lower distortion)._
+_Negative difference means Go implementation has better THD (lower distortion)._ Go
+figures come from the bundled quality-regression suite and are reproducible with
+`go test ./internal/engine -run TestQualityRegression_THD -v`.
 
 **Key findings:**
 
-- **High and VeryHigh presets match or exceed libsoxr quality** with THD differences under 2 dB
-- All presets achieve SNR (Signal-to-Noise Ratio) matching libsoxr within measurement tolerance
-- Downsampling (e.g., 48kHz → 32kHz) often shows even better performance due to optimized anti-aliasing filters
+- **High and VeryHigh presets match or exceed libsoxr quality**, within 0.5 dB (High slightly better, VeryHigh essentially identical)
+- **Low and Medium track libsoxr closely**: Medium is within ~1 dB and Low within ~4 dB, trading a little stopband headroom for lower passband ripple
+- Downsampling (e.g., 48kHz → 32kHz) shows substantially better THD (below -190 dB across presets) thanks to the anti-aliasing filters
 
 ### Custom Quality Settings
 
@@ -312,8 +314,8 @@ output32, _ := r32.Process(input32)
 
 | Mode    | THD @ 1kHz | Use Case                          |
 | ------- | ---------- | --------------------------------- |
-| float64 | -144.95 dB | Maximum precision, critical audio |
-| float32 | -144.96 dB | Higher throughput, general use    |
+| float64 | -145.25 dB | Maximum precision, critical audio |
+| float32 | -145.01 dB | Higher throughput, general use    |
 
 Both modes achieve equivalent quality for most use cases. Use float32 when processing large amounts of audio data where throughput is more important than theoretical precision limits.
 
