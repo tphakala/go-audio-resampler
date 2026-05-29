@@ -13,7 +13,7 @@ func TestStageAdapterFloat32_ProcessZeroCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	adapter := NewStageAdapter[float32](r)
+	adapter := NewStageAdapter(r)
 	input := make([]float64, 4096)
 	for i := range input {
 		input[i] = math.Sin(2.0 * math.Pi * 440.0 * float64(i) / 44100.0)

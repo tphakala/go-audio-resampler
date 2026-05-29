@@ -8,7 +8,6 @@ require (
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	github.com/stretchr/testify v1.11.1
 	github.com/tphakala/simd v1.1.0
-	gonum.org/v1/gonum v0.17.0
 )
 
 require (
