@@ -8,11 +8,6 @@ import (
 
 // FFT convolution constants.
 const (
-	// Minimum kernel length to use FFT convolution (below this, direct is faster).
-	// Benchmarking shows crossover around 400-500 taps with gonum FFT.
-	// Direct SIMD convolution is faster for typical filter lengths (128-256 taps).
-	minKernelForFFT = 400
-
 	// Default FFT block size (power of 2 for efficiency)
 	defaultFFTBlockSize = 512
 
@@ -157,20 +152,4 @@ func (c *FFTConvolver) Convolve(dst, signal []float64) {
 func (c *FFTConvolver) multiplyFFT() {
 	// Use SIMD complex multiplication
 	c128.Mul(c.productFFT, c.signalFFT, c.kernelFFT)
-}
-
-// ConvolveValidFFT is a convenience function that uses FFT convolution
-// when beneficial, falling back to direct convolution for short kernels.
-func ConvolveValidFFT(dst, signal, kernel []float64) {
-	if len(kernel) < minKernelForFFT {
-		// Use direct SIMD convolution for short kernels
-		f64.ConvolveValid(dst, signal, kernel)
-		return
-	}
-
-	// Use FFT convolution for long kernels
-	conv := NewFFTConvolver(kernel)
-	if conv != nil {
-		conv.Convolve(dst, signal)
-	}
 }

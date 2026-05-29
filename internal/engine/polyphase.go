@@ -426,9 +426,8 @@ const (
 	transitionBWFactor = 0.05 // Transition bandwidth relative to Nyquist
 
 	// Polyphase filter design constants.
-	downsamplingTransitionScale = 0.15  // Transition band scale factor for downsampling
-	transitionBandwidthHalf     = 0.5   // Half factor for transition bandwidth calculation
-	invFRespThreshold           = 0.999 // Guard against division by zero in rolloff compensation
+	transitionBandwidthHalf = 0.5   // Half factor for transition bandwidth calculation
+	invFRespThreshold       = 0.999 // Guard against division by zero in rolloff compensation
 
 	// Buffer sizing constants.
 	historyBufferMultiplier = 2 // Extra capacity for history buffers
@@ -442,8 +441,7 @@ const (
 	rationalApproxTolerance = 1e-10 // Tolerance for finding rational approximation
 
 	// Loop unrolling constants.
-	loopUnrollFactor = 4 // Process 4 taps at a time
-	loopUnrollMask   = 3 // Mask for computing unrolled count (factor - 1)
+	loopUnrollMask = 3 // Mask for computing unrolled count (factor - 1)
 
 	// Half-band optimization constant.
 	// Half-band filters are used for 2× upsampling where Phase 0 is a passthrough.
@@ -452,9 +450,7 @@ const (
 	// soxr-derived filter design constants.
 	// These values are from soxr's filter design algorithm.
 	soxrDFTStageFc       = 0.4778321 // soxr's Fc for DFT stage (1.0 = Nyquist)
-	passbandRolloffScale = 0.99      // Scale factor for passband edge (99% of Nyquist)
 	imageRejectionFactor = 2.0       // Factor for image rejection frequency calculation
-	soxrFcDenominator    = 2.0       // Denominator in soxr's Fc formula: Fc = (Fp+Fs)/(2*phases)
 	soxrToOurNormScale   = 2.0       // Scale to convert soxr [0,1] to our [0,0.5] normalization
 
 	// soxr downsampling filter design constants (from cr.c lines 426-431).
