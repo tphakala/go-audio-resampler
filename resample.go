@@ -22,15 +22,11 @@ type Resampler interface {
 	// Channels are processed independently but may share filter coefficients.
 	ProcessMulti(input [][]float64) ([][]float64, error)
 
-	// Flush returns any remaining samples in internal buffers for
-	// channel 0. Single-channel only: after ProcessMulti, use FlushMulti
-	// to drain every channel's pipeline.
+	// Flush returns any remaining samples in internal buffers.
+	// Should be called when no more input will be provided.
+	// For multi-channel streams processed via ProcessMulti, use the
+	// MultiFlusher interface instead to drain every channel.
 	Flush() ([]float64, error)
-
-	// FlushMulti returns any remaining samples in internal buffers for
-	// every channel. Should be called instead of Flush when using
-	// ProcessMulti with multi-channel streams.
-	FlushMulti() ([][]float64, error)
 
 	// GetLatency returns the resampler latency in samples.
 	// This is the delay between input and output due to filtering.
@@ -317,6 +313,19 @@ type Info struct {
 }
 
 // infoProvider is an optional interface for resamplers that can provide detailed info.
+// MultiFlusher is an optional interface for resamplers that support
+// multi-channel flushing. Use a type assertion to check support:
+//
+//	if mf, ok := r.(MultiFlusher); ok {
+//	    channels, err := mf.FlushMulti()
+//	}
+type MultiFlusher interface {
+	// FlushMulti returns any remaining samples in internal buffers for
+	// every channel. Should be called instead of Flush when using
+	// ProcessMulti with multi-channel streams.
+	FlushMulti() ([][]float64, error)
+}
+
 type infoProvider interface {
 	GetInfo() Info
 }

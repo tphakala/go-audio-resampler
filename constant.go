@@ -344,81 +344,64 @@ func (r *constantRateResampler) processChannelInto(channel int, input, dst []flo
 // Flush returns any remaining samples.
 // Flush drains channel 0's pipeline. Single-channel only: after
 // ProcessMulti, use FlushMulti to drain every channel.
+// Flush drains channel 0's pipeline. For multi-channel streams processed
+// via ProcessMulti, use FlushMulti to drain every channel.
 func (r *constantRateResampler) Flush() ([]float64, error) {
 	if len(r.channels) == 0 {
 		return []float64{}, nil
 	}
+	return r.flushChannel(0, r.channels[0])
+}
 
-	ch := r.channels[0]
-
+// flushChannel drains one channel's multi-stage pipeline. Stages are flushed
+// front-to-back: pending input (including the previous stage's flushed tail)
+// is processed through the stage before flushing its delay line, so the tail
+// propagates all the way to the final buffer (issue #37).
+func (r *constantRateResampler) flushChannel(chIdx int, ch *channelResampler) ([]float64, error) {
 	for i, stage := range ch.stages {
 		inputBuffer := ch.buffers[i]
 		outputBuffer := ch.buffers[i+1]
 
-		// Run pending input (including the previous stage's flushed tail)
-		// through this stage before flushing it.
 		if avail := inputBuffer.Available(); avail > 0 {
-			output, err := stage.Process(inputBuffer.Read(avail))
+			out, err := stage.Process(inputBuffer.Read(avail))
 			if err != nil {
-				return nil, fmt.Errorf("stage %d flush-process error: %w", i, err)
-			}
-			if len(output) > 0 {
-				outputBuffer.Write(output)
-			}
-		}
-
-		// Flush the stage's internal delay line.
-		output, err := stage.Flush()
-		if err != nil {
-			return nil, fmt.Errorf("stage %d flush error: %w", i, err)
-		}
-		if len(output) > 0 {
-			outputBuffer.Write(output)
-		}
-	}
-
-	// Return all remaining output
-	finalBuffer := ch.buffers[len(ch.buffers)-1]
-	return finalBuffer.ReadAll(), nil
-}
-
-// FlushMulti flushes every channel's pipeline independently, returning one
-// slice per channel. The per-channel flush logic is identical to Flush.
-func (r *constantRateResampler) FlushMulti() ([][]float64, error) {
-	if len(r.channels) == 0 {
-		return [][]float64{}, nil
-	}
-
-	output := make([][]float64, len(r.channels))
-
-	for chIdx, ch := range r.channels {
-		for i, stage := range ch.stages {
-			inputBuffer := ch.buffers[i]
-			outputBuffer := ch.buffers[i+1]
-
-			if avail := inputBuffer.Available(); avail > 0 {
-				out, err := stage.Process(inputBuffer.Read(avail))
-				if err != nil {
-					return nil, fmt.Errorf("channel %d stage %d flush-process error: %w", chIdx, i, err)
-				}
-				if len(out) > 0 {
-					outputBuffer.Write(out)
-				}
-			}
-
-			out, err := stage.Flush()
-			if err != nil {
-				return nil, fmt.Errorf("channel %d stage %d flush error: %w", chIdx, i, err)
+				return nil, fmt.Errorf("channel %d stage %d flush-process error: %w", chIdx, i, err)
 			}
 			if len(out) > 0 {
 				outputBuffer.Write(out)
 			}
 		}
 
-		finalBuffer := ch.buffers[len(ch.buffers)-1]
-		output[chIdx] = finalBuffer.ReadAll()
+		out, err := stage.Flush()
+		if err != nil {
+			return nil, fmt.Errorf("channel %d stage %d flush error: %w", chIdx, i, err)
+		}
+		if len(out) > 0 {
+			outputBuffer.Write(out)
+		}
 	}
 
+	finalBuffer := ch.buffers[len(ch.buffers)-1]
+	return finalBuffer.ReadAll(), nil
+}
+
+// FlushMulti flushes every channel's pipeline independently, returning one
+// slice per channel. The per-channel flush logic is identical to Flush.
+// FlushMulti flushes every channel's pipeline independently, returning one
+// slice per channel.
+func (r *constantRateResampler) FlushMulti() ([][]float64, error) {
+	if len(r.channels) == 0 {
+		return [][]float64{}, nil
+	}
+
+	output := make([][]float64, len(r.channels))
+	for chIdx, ch := range r.channels {
+		flushed, err := r.flushChannel(chIdx, ch)
+		if err != nil {
+			return nil, err
+		}
+		output[chIdx] = flushed
+	}
 	return output, nil
 }
 

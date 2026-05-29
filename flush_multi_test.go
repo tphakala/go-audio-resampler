@@ -50,7 +50,12 @@ func TestFlushMulti_AllChannelsDrained(t *testing.T) {
 				t.Fatalf("ProcessMulti: %v", err)
 			}
 
-			flushed, err := r.FlushMulti()
+			mf, ok := r.(MultiFlusher)
+			if !ok {
+				t.Fatal("resampler does not implement MultiFlusher")
+			}
+
+			flushed, err := mf.FlushMulti()
 			if err != nil {
 				t.Fatalf("FlushMulti: %v", err)
 			}
@@ -129,7 +134,12 @@ func TestFlushMulti_MatchesPerChannelFlush(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProcessMulti: %v", err)
 	}
-	flushed, err := r.FlushMulti()
+	mf, ok := r.(MultiFlusher)
+	if !ok {
+		t.Fatal("resampler does not implement MultiFlusher")
+	}
+
+	flushed, err := mf.FlushMulti()
 	if err != nil {
 		t.Fatalf("FlushMulti: %v", err)
 	}
@@ -155,7 +165,12 @@ func TestFlushMulti_EmptyResampler(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	flushed, err := r.FlushMulti()
+	mf, ok := r.(MultiFlusher)
+	if !ok {
+		t.Fatal("resampler does not implement MultiFlusher")
+	}
+
+	flushed, err := mf.FlushMulti()
 	if err != nil {
 		t.Fatalf("FlushMulti: %v", err)
 	}
