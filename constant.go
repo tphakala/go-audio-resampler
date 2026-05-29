@@ -162,7 +162,8 @@ func (r *constantRateResampler) ProcessFloat32Into(input, output []float32) (int
 	if len(r.channels) == 0 {
 		return 0, fmt.Errorf("no channels initialized")
 	}
-	if len(output) < r.EstimateOutput(len(input)) {
+	required := r.EstimateOutput(len(input))
+	if len(output) < required {
 		return 0, ErrBufferTooSmall // checked before any state is advanced
 	}
 
@@ -176,12 +177,15 @@ func (r *constantRateResampler) ProcessFloat32Into(input, output []float32) (int
 		r.f32in[i] = float64(v)
 	}
 
-	// Grow-only float64 output scratch sized to the caller's buffer, matching
-	// the destination ProcessInto would write into.
-	if cap(r.f32out) < len(output) {
-		r.f32out = make([]float64, len(output))
+	// Grow-only float64 output scratch sized to the estimated output bound, not
+	// the caller's buffer. processChannelInto never produces more than
+	// EstimateOutput samples, so sizing to required keeps the scratch bounded by
+	// input length instead of letting an oversized caller buffer grow it without
+	// limit for the lifetime of the resampler.
+	if cap(r.f32out) < required {
+		r.f32out = make([]float64, required)
 	} else {
-		r.f32out = r.f32out[:len(output)]
+		r.f32out = r.f32out[:required]
 	}
 
 	n, err := r.processChannelInto(0, r.f32in, r.f32out)
