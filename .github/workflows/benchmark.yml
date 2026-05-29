@@ -8,10 +8,16 @@ permissions:
   contents: read
   pull-requests: write
 
+# Cancel a previous in-flight benchmark run when the PR gets a new push.
+concurrency:
+  group: benchmark-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   benchmark:
     name: Benchmark Comparison
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout PR
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -20,8 +26,12 @@ jobs:
         with:
           go-version: stable
 
+      # -run='^$' matches no tests, so this runs ONLY benchmarks. Without it,
+      # `go test -bench` also runs the full unit-test suite (in both checkouts),
+      # which is what made this job time out at 10m. -benchtime/-count are kept
+      # modest to keep the PR signal fast; benchstat still flags real regressions.
       - name: Run benchmarks on PR
-        run: go test -bench=. -benchmem -count=5 -timeout=10m ./... | tee pr.bench
+        run: go test -bench=. -benchmem -run='^$' -benchtime=100ms -count=6 -timeout=15m ./... | tee pr.bench
 
       - name: Checkout base
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -29,7 +39,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Run benchmarks on base
-        run: go test -bench=. -benchmem -count=5 -timeout=10m ./... | tee base.bench
+        run: go test -bench=. -benchmem -run='^$' -benchtime=100ms -count=6 -timeout=15m ./... | tee base.bench
 
       - name: Install benchstat
         run: go install golang.org/x/perf/cmd/benchstat@latest

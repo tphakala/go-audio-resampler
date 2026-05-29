@@ -568,14 +568,10 @@ func precisionMeasureTHD(output []float64, testFreq, sampleRate float64) float64
 		windowed[i] = complex(segment[i]*window, 0)
 	}
 
-	// Simple DFT (for accuracy, not speed)
-	spectrum := make([]complex128, fftSize)
-	for k := range fftSize {
-		for n := range fftSize {
-			angle := -2 * math.Pi * float64(k) * float64(n) / float64(fftSize)
-			spectrum[k] += windowed[n] * cmplx.Exp(complex(0, angle))
-		}
-	}
+	// FFT via the shared Cooley-Tukey helper (fftSize is a power of two).
+	// This replaces an O(n^2) DFT that called cmplx.Exp n^2 times and made
+	// the precision tests take minutes / time out in CI.
+	spectrum := fft(windowed)
 
 	// Find fundamental and harmonics
 	binWidth := sampleRate / float64(fftSize)
@@ -625,14 +621,10 @@ func precisionMeasureSNR(output []float64, testFreq, sampleRate float64) float64
 		windowed[i] = complex(segment[i]*window, 0)
 	}
 
-	// Simple DFT
-	spectrum := make([]complex128, fftSize)
-	for k := range fftSize {
-		for n := range fftSize {
-			angle := -2 * math.Pi * float64(k) * float64(n) / float64(fftSize)
-			spectrum[k] += windowed[n] * cmplx.Exp(complex(0, angle))
-		}
-	}
+	// FFT via the shared Cooley-Tukey helper (fftSize is a power of two).
+	// This replaces an O(n^2) DFT that called cmplx.Exp n^2 times and made
+	// the precision tests take minutes / time out in CI.
+	spectrum := fft(windowed)
 
 	binWidth := sampleRate / float64(fftSize)
 	fundBin := int(math.Round(testFreq / binWidth))
