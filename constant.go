@@ -18,6 +18,13 @@ type constantRateResampler struct {
 	// Per-channel state
 	channels []*channelResampler
 
+	// Grow-only float64 scratch buffers reused by ProcessFloat32Into to convert
+	// float32 input/output without allocating on every call. The engine's
+	// growStableLen/appendStable helpers live in internal/engine and are not
+	// importable here, so the grow-only sizing is done inline.
+	f32in  []float64
+	f32out []float64
+
 	// Shared resources
 	mu sync.RWMutex
 }
@@ -136,6 +143,59 @@ func (r *constantRateResampler) ProcessFloat32(input []float32) ([]float32, erro
 	}
 
 	return output32, nil
+}
+
+// ProcessFloat32Into resamples float32 input into the caller-provided float32
+// output buffer. It is the caller-owned-output, float32 counterpart of
+// ProcessInto: it writes up to len(output) samples, returns the count, and
+// returns ErrBufferTooSmall before advancing state if output cannot hold
+// EstimateOutput(len(input)) samples.
+//
+// Unlike ProcessFloat32, which allocates an input, intermediate, and output
+// slice on every call, this method reuses grow-only internal scratch buffers
+// for the float32<->float64 conversion, so it performs zero allocations once
+// warm. Processing still runs through the float64 pipeline for precision.
+//
+// Single-channel only, matching ProcessFloat32 and the float64 ProcessInto.
+// It is not safe for concurrent use with itself or the other Process methods.
+func (r *constantRateResampler) ProcessFloat32Into(input, output []float32) (int, error) {
+	if len(r.channels) == 0 {
+		return 0, fmt.Errorf("no channels initialized")
+	}
+	required := r.EstimateOutput(len(input))
+	if len(output) < required {
+		return 0, ErrBufferTooSmall // checked before any state is advanced
+	}
+
+	// Grow-only float32 -> float64 input scratch.
+	if cap(r.f32in) < len(input) {
+		r.f32in = make([]float64, len(input))
+	} else {
+		r.f32in = r.f32in[:len(input)]
+	}
+	for i, v := range input {
+		r.f32in[i] = float64(v)
+	}
+
+	// Grow-only float64 output scratch sized to the estimated output bound, not
+	// the caller's buffer. processChannelInto never produces more than
+	// EstimateOutput samples, so sizing to required keeps the scratch bounded by
+	// input length instead of letting an oversized caller buffer grow it without
+	// limit for the lifetime of the resampler.
+	if cap(r.f32out) < required {
+		r.f32out = make([]float64, required)
+	} else {
+		r.f32out = r.f32out[:required]
+	}
+
+	n, err := r.processChannelInto(0, r.f32in, r.f32out)
+	if err != nil {
+		return 0, err
+	}
+	for i := range n {
+		output[i] = float32(r.f32out[i])
+	}
+	return n, nil
 }
 
 // ProcessMulti processes multiple audio channels.

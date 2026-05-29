@@ -83,6 +83,11 @@
 //     retry with a larger buffer.
 //   - Data beyond output[:n] is unspecified.
 //
+// The same contract is available for float32 audio via
+// [SimpleResamplerFloat32.ProcessInto] and [SimpleResamplerFloat32.EstimateOutput],
+// which run on the float32-native engine and are likewise zero-allocation once
+// warm.
+//
 // # Quality Presets
 //
 // The library provides several quality presets for common use cases:

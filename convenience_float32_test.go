@@ -1,7 +1,10 @@
 package resampler
 
 import (
+	"errors"
+	"fmt"
 	"math"
+	"math/rand"
 	"testing"
 )
 
@@ -295,5 +298,279 @@ func TestSimpleResamplerFloat32_GetStatistics(t *testing.T) {
 	finalStats := r.GetStatistics()
 	if finalStats["samplesOut"] == 0 {
 		t.Error("samplesOut is zero after Flush")
+	}
+}
+
+// processFloat32IntoResampler is the concrete-type surface exercised by the
+// ProcessFloat32Into tests. ProcessFloat32Into and EstimateOutput are not part
+// of the public Resampler interface (matching the float64 ProcessInto), so the
+// tests type-assert the New(...) result to reach them.
+type processFloat32IntoResampler interface {
+	ProcessFloat32(input []float32) ([]float32, error)
+	ProcessFloat32Into(input, output []float32) (int, error)
+	EstimateOutput(inputLen int) int
+}
+
+// makeFloat32Sine builds a deterministic float32 test signal (fundamental plus
+// a quieter third harmonic) for the zero-copy float32 API tests.
+func makeFloat32Sine(numSamples int, sampleRate float64) []float32 {
+	const freq = 440.0
+	input := make([]float32, numSamples)
+	for i := range input {
+		t := float64(i) / sampleRate
+		input[i] = float32(math.Sin(2*math.Pi*freq*t) + 0.1*math.Sin(2*math.Pi*3*freq*t))
+	}
+	return input
+}
+
+// TestSimpleResamplerFloat32_ProcessInto_MatchesProcess verifies the
+// caller-owned float32 ProcessInto produces bit-identical output to Process
+// across common rate pairs and qualities. This guards the float32 streaming
+// path the same way TestProcessInto_MatchesProcess guards the float64 path.
+func TestSimpleResamplerFloat32_ProcessInto_MatchesProcess(t *testing.T) {
+	ratePairs := []struct{ inRate, outRate float64 }{
+		{48000, 16000},
+		{48000, 32000},
+		{44100, 48000},
+		{48000, 44100},
+		{96000, 48000},
+		{16000, 48000},
+	}
+	qualities := []QualityPreset{QualityLow, QualityMedium, QualityHigh}
+
+	for _, rp := range ratePairs {
+		for _, q := range qualities {
+			name := fmt.Sprintf("%gto%g_q%d", rp.inRate, rp.outRate, q)
+			t.Run(name, func(t *testing.T) {
+				rProcess, err := NewEngineFloat32(rp.inRate, rp.outRate, q)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rInto, err := NewEngineFloat32(rp.inRate, rp.outRate, q)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				input := makeFloat32Sine(int(rp.inRate)*3, rp.inRate)
+
+				outProcess, err := rProcess.Process(input)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				outBuf := make([]float32, rInto.EstimateOutput(len(input)))
+				n, err := rInto.ProcessInto(input, outBuf)
+				if err != nil {
+					t.Fatal(err)
+				}
+				outInto := outBuf[:n]
+
+				if len(outProcess) != len(outInto) {
+					t.Fatalf("length mismatch: Process=%d ProcessInto=%d", len(outProcess), len(outInto))
+				}
+				for i := range outProcess {
+					if outProcess[i] != outInto[i] {
+						t.Fatalf("sample %d differs: Process=%v ProcessInto=%v", i, outProcess[i], outInto[i])
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestSimpleResamplerFloat32_ProcessInto_BufferTooSmall verifies the float32
+// ProcessInto returns ErrBufferTooSmall when the output buffer is undersized.
+func TestSimpleResamplerFloat32_ProcessInto_BufferTooSmall(t *testing.T) {
+	r, err := NewEngineFloat32(48000, 96000, QualityMedium) // 2x upsample
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := makeFloat32Sine(48000, 48000)
+	tiny := make([]float32, 10)
+	if _, err := r.ProcessInto(input, tiny); !errors.Is(err, ErrBufferTooSmall) {
+		t.Fatalf("expected ErrBufferTooSmall, got %v", err)
+	}
+}
+
+// TestSimpleResamplerFloat32_ProcessInto_DoesNotAdvanceState verifies a failed
+// (too-small) ProcessInto call does not consume input, so a retry with a
+// correctly sized buffer yields the same result as the correctly sized call
+// alone.
+func TestSimpleResamplerFloat32_ProcessInto_DoesNotAdvanceState(t *testing.T) {
+	const inRate, outRate = 48000.0, 32000.0
+	input := makeFloat32Sine(int(inRate*3), inRate)
+
+	expected, err := NewEngineFloat32(inRate, outRate, QualityMedium)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expBuf := make([]float32, expected.EstimateOutput(len(input)))
+	expN, err := expected.ProcessInto(input, expBuf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	retry, err := NewEngineFloat32(inRate, outRate, QualityMedium)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := retry.ProcessInto(input, make([]float32, 1)); !errors.Is(err, ErrBufferTooSmall) {
+		t.Fatalf("expected ErrBufferTooSmall on first attempt, got %v", err)
+	}
+	retryBuf := make([]float32, retry.EstimateOutput(len(input)))
+	retryN, err := retry.ProcessInto(input, retryBuf)
+	if err != nil {
+		t.Fatalf("retry failed after ErrBufferTooSmall: %v", err)
+	}
+	if retryN != expN {
+		t.Fatalf("retry length mismatch: got %d want %d", retryN, expN)
+	}
+	for i := range expN {
+		if retryBuf[i] != expBuf[i] {
+			t.Fatalf("retry sample %d differs: got %v want %v", i, retryBuf[i], expBuf[i])
+		}
+	}
+}
+
+// TestSimpleResamplerFloat32_EstimateOutput_UpperBound verifies EstimateOutput
+// is a sufficient upper bound for ProcessInto across random chunk sizes.
+func TestSimpleResamplerFloat32_EstimateOutput_UpperBound(t *testing.T) {
+	cases := []struct{ inRate, outRate float64 }{
+		{48000, 16000},
+		{48000, 32000},
+		{44100, 48000},
+		{48000, 44100},
+	}
+	const (
+		maxChunkLen = 24000
+		iterations  = 80
+	)
+	for idx, tc := range cases {
+		name := fmt.Sprintf("%gto%g", tc.inRate, tc.outRate)
+		t.Run(name, func(t *testing.T) {
+			rng := rand.New(rand.NewSource(2025 + int64(idx)))
+			r, err := NewEngineFloat32(tc.inRate, tc.outRate, QualityMedium)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range iterations {
+				inputLen := 1 + rng.Intn(maxChunkLen)
+				input := make([]float32, inputLen)
+				for j := range input {
+					input[j] = float32(rng.Float64()*2 - 1)
+				}
+				estimate := r.EstimateOutput(inputLen)
+				output := make([]float32, estimate)
+				n, err := r.ProcessInto(input, output)
+				if err != nil {
+					t.Fatalf("ProcessInto failed at iter %d (input=%d, estimate=%d): %v", i, inputLen, estimate, err)
+				}
+				if n > estimate {
+					t.Fatalf("wrote beyond estimate at iter %d: wrote=%d estimate=%d", i, n, estimate)
+				}
+			}
+		})
+	}
+}
+
+// TestProcessFloat32Into_MatchesProcessFloat32 verifies the caller-owned
+// float32 batch API on the New(...) path produces bit-identical output to
+// ProcessFloat32.
+func TestProcessFloat32Into_MatchesProcessFloat32(t *testing.T) {
+	ratePairs := []struct{ inRate, outRate float64 }{
+		{48000, 16000},
+		{48000, 32000},
+		{44100, 48000},
+		{48000, 44100},
+		{96000, 48000},
+		{16000, 48000},
+	}
+	for _, rp := range ratePairs {
+		name := fmt.Sprintf("%gto%g", rp.inRate, rp.outRate)
+		t.Run(name, func(t *testing.T) {
+			cfg := &Config{InputRate: rp.inRate, OutputRate: rp.outRate, Channels: 1, Quality: QualitySpec{Preset: QualityMedium}}
+
+			rProcess, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rIntoRaw, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rInto, ok := rIntoRaw.(processFloat32IntoResampler)
+			if !ok {
+				t.Fatal("New(...) result does not implement ProcessFloat32Into")
+			}
+
+			input := makeFloat32Sine(int(rp.inRate)*3, rp.inRate)
+
+			outProcess, err := rProcess.ProcessFloat32(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outBuf := make([]float32, rInto.EstimateOutput(len(input)))
+			n, err := rInto.ProcessFloat32Into(input, outBuf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outInto := outBuf[:n]
+
+			if len(outProcess) != len(outInto) {
+				t.Fatalf("length mismatch: ProcessFloat32=%d ProcessFloat32Into=%d", len(outProcess), len(outInto))
+			}
+			for i := range outProcess {
+				if outProcess[i] != outInto[i] {
+					t.Fatalf("sample %d differs: ProcessFloat32=%v ProcessFloat32Into=%v", i, outProcess[i], outInto[i])
+				}
+			}
+		})
+	}
+}
+
+// TestProcessFloat32Into_BufferTooSmall verifies ProcessFloat32Into returns
+// ErrBufferTooSmall for an undersized buffer and does not advance state, so a
+// retry with a correct buffer matches the result of a single correct call.
+func TestProcessFloat32Into_BufferTooSmall(t *testing.T) {
+	cfg := &Config{InputRate: 48000, OutputRate: 96000, Channels: 1, Quality: QualitySpec{Preset: QualityMedium}}
+
+	expectedRaw, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, ok := expectedRaw.(processFloat32IntoResampler)
+	if !ok {
+		t.Fatal("New(...) result does not implement ProcessFloat32Into")
+	}
+	input := makeFloat32Sine(48000, 48000)
+	expBuf := make([]float32, expected.EstimateOutput(len(input)))
+	expN, err := expected.ProcessFloat32Into(input, expBuf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	retryRaw, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, ok := retryRaw.(processFloat32IntoResampler)
+	if !ok {
+		t.Fatal("New(...) result does not implement ProcessFloat32Into")
+	}
+	if _, err := retry.ProcessFloat32Into(input, make([]float32, 1)); !errors.Is(err, ErrBufferTooSmall) {
+		t.Fatalf("expected ErrBufferTooSmall on first attempt, got %v", err)
+	}
+	retryBuf := make([]float32, retry.EstimateOutput(len(input)))
+	retryN, err := retry.ProcessFloat32Into(input, retryBuf)
+	if err != nil {
+		t.Fatalf("retry failed after ErrBufferTooSmall: %v", err)
+	}
+	if retryN != expN {
+		t.Fatalf("retry length mismatch: got %d want %d", retryN, expN)
+	}
+	for i := range expN {
+		if retryBuf[i] != expBuf[i] {
+			t.Fatalf("retry sample %d differs: got %v want %v", i, retryBuf[i], expBuf[i])
+		}
 	}
 }
