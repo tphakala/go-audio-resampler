@@ -31,9 +31,6 @@ type PolyphaseStage[F simdops.Float] struct {
 	numPhases    int // L in soxr
 	tapsPerPhase int // Number of taps per phase
 
-	// Precomputed loop bounds (avoid recalculating each iteration)
-	tapsPerPhase4 int // tapsPerPhase &^ 3, for loop unrolling
-
 	// Phase accumulator - fixed-point with 32-bit fractional precision (like soxr)
 	// at = integer_part * (1 << phaseFracBits) + fractional_part
 	at   int64 // Current position in fixed-point
@@ -76,7 +73,7 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 	// Find rational approximation for the ratio
 	// We want: ratio ≈ L / step (output samples per input sample)
 	// So: step / L ≈ 1 / ratio
-	numPhases, stepInt := findRationalApprox(ratio)
+	numPhases, _ := findRationalApprox(ratio)
 
 	// Design polyphase filter bank (always in float64 for precision)
 	// Pass totalIORatio and hasPreStage for correct Fp1/Fn calculation (soxr uses total ratio)
@@ -95,9 +92,9 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 
 	// Compute step as a true fixed-point number with full fractional precision
 	// step = (1/ratio) * numPhases * (1 << phaseFracBits)
-	// This is CRITICAL: using stepInt would lose fractional precision and make
-	// sub-phase interpolation useless (frac would always be 0)
-	_ = stepInt // Keep for rational approximation validation (used in filter design)
+	// This is CRITICAL: the integer step from findRationalApprox would lose
+	// fractional precision and make sub-phase interpolation useless (frac would
+	// always be 0), so it is intentionally discarded above.
 	phaseFracScale := float64(int64(1) << phaseFracBits)
 	step := int64(math.Round((1.0 / ratio) * float64(numPhases) * phaseFracScale))
 
@@ -160,7 +157,6 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 		polyCoeffsD:   polyCoeffsD,
 		numPhases:     numPhases,
 		tapsPerPhase:  tapsPerPhase,
-		tapsPerPhase4: tapsPerPhase &^ loopUnrollMask,
 		at:            0,
 		step:          step,
 		phaseFracBits: phaseFracBits,

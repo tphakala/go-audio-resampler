@@ -492,8 +492,8 @@ func (s *DFTDecimationStage[F]) processZeroCopy(input []F) ([]F, error) { //noli
 		return []F{}, nil
 	}
 
-	// Append input to history
-	s.history = append(s.history, input...)
+	// Append input to history (stable growth avoids steady-state realloc on input jitter)
+	s.history = appendStable(s.history, input)
 
 	numAvailable := len(s.history)
 	if numAvailable < s.numTaps {
@@ -514,12 +514,8 @@ func (s *DFTDecimationStage[F]) processZeroCopy(input []F) ([]F, error) { //noli
 		return []F{}, nil
 	}
 
-	// Allocate output buffer
-	if cap(s.outputBuf) < numOutput {
-		s.outputBuf = make([]F, numOutput)
-	} else {
-		s.outputBuf = s.outputBuf[:numOutput]
-	}
+	// Allocate output buffer (stable growth avoids steady-state realloc on jitter)
+	s.outputBuf = growStableLen(s.outputBuf, numOutput)
 
 	// Filter and decimate
 	outIdx := 0

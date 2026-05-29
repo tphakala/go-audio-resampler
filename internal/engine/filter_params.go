@@ -103,9 +103,6 @@ const (
 	// Rational approximation constants.
 	rationalApproxTolerance = 1e-10 // Tolerance for finding rational approximation
 
-	// Loop unrolling constants.
-	loopUnrollMask = 3 // Mask for computing unrolled count (factor - 1)
-
 	// Half-band optimization constant.
 	// Half-band filters are used for 2× upsampling where Phase 0 is a passthrough.
 	halfBandFactor = 2
