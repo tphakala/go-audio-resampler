@@ -280,6 +280,15 @@ figures come from the bundled quality-regression suite and are reproducible with
 - All presets achieve SNR (Signal-to-Noise Ratio) matching libsoxr within measurement tolerance
 - Downsampling (e.g., 48kHz → 32kHz) shows substantially better THD (below -190 dB across presets) thanks to the anti-aliasing filters
 
+> **Why does Low show better THD than Medium?** Both presets are 16-bit (same noise
+> floor), so the difference is filter geometry, not precision. Low keeps its passband
+> to 80% of Nyquist with a wide, gentle transition, which is easy to realize cleanly
+> and yields excellent THD, but discards more high-frequency content. Medium extends
+> the passband to 90% of Nyquist with a sharper transition: it preserves more bandwidth
+> but leaks slightly more energy near Nyquist, so its single-tone THD is higher. Low
+> and Medium are a bandwidth-versus-distortion trade, not a simple quality ranking, and
+> libsoxr's own LQ/MQ recipes show the same ordering.
+
 ### Custom Quality Settings
 
 ```go
