@@ -323,7 +323,20 @@ func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
 
 // Flush returns any remaining buffered samples.
 func (s *PolyphaseStage[F]) Flush() ([]F, error) {
-	zeros := make([]F, s.tapsPerPhase*historyBufferMultiplier)
+	// Nothing buffered: a stage that was never fed has no delay line to drain.
+	// Padding zeros into an empty history would emit a phantom window of
+	// zero-valued samples. Guard matches the sibling DFTStage.Flush.
+	if len(s.history) == 0 {
+		return []F{}, nil
+	}
+
+	// Pad with tapsPerPhase zeros to drain the polyphase delay line, matching
+	// the sibling DFTStage.Flush. historyBufferMultiplier is a buffer
+	// pre-allocation constant, not a flush-padding amount: padding
+	// tapsPerPhase*historyBufferMultiplier zeros pushes an extra tapsPerPhase
+	// zeros through the filter, producing additional all-zero output windows
+	// (trailing silence) and a longer-than-canonical output length (issue #30).
+	zeros := make([]F, s.tapsPerPhase)
 	return s.Process(zeros)
 }
 
