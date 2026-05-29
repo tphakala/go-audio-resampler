@@ -341,9 +341,6 @@ func (r *constantRateResampler) processChannelInto(channel int, input, dst []flo
 	return n, nil
 }
 
-// Flush returns any remaining samples.
-// Flush drains channel 0's pipeline. Single-channel only: after
-// ProcessMulti, use FlushMulti to drain every channel.
 // Flush drains channel 0's pipeline. For multi-channel streams processed
 // via ProcessMulti, use FlushMulti to drain every channel.
 func (r *constantRateResampler) Flush() ([]float64, error) {
@@ -385,8 +382,6 @@ func (r *constantRateResampler) flushChannel(chIdx int, ch *channelResampler) ([
 	return finalBuffer.ReadAll(), nil
 }
 
-// FlushMulti flushes every channel's pipeline independently, returning one
-// slice per channel. The per-channel flush logic is identical to Flush.
 // FlushMulti flushes every channel's pipeline independently, returning one
 // slice per channel.
 func (r *constantRateResampler) FlushMulti() ([][]float64, error) {
