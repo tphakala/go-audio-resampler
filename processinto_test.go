@@ -104,7 +104,7 @@ func TestProcessInto_MatchesProcess(t *testing.T) {
 // TestProcessInto_ZeroAllocs enforces the zero-allocation invariant as a hard
 // test failure. Uses testing.AllocsPerRun to measure steady-state allocations
 // after internal buffers have grown to their final size.
-func TestProcessInto_ZeroAllocs(t *testing.T) {
+func TestProcessInto_ZeroAllocs(t *testing.T) { //nolint:dupl // intentional parallel structure with TestProcessIntoFloat32_ZeroAllocs
 	cases := []struct {
 		name            string
 		inRate, outRate float64
@@ -440,6 +440,111 @@ func TestEstimateOutput_UpperBound_NewPath(t *testing.T) {
 				if n != len(expected) {
 					t.Fatalf("length mismatch at iteration %d: Process=%d ProcessInto=%d", i, len(expected), n)
 				}
+			}
+		})
+	}
+}
+
+// TestProcessIntoFloat32_ZeroAllocs enforces the zero-allocation invariant for
+// the float32 engine path (SimpleResamplerFloat32.ProcessInto), mirroring
+// TestProcessInto_ZeroAllocs. The engine is float32-native, so there is no
+// float64 round-trip on this path.
+func TestProcessIntoFloat32_ZeroAllocs(t *testing.T) { //nolint:dupl // intentional float32 mirror of TestProcessInto_ZeroAllocs
+	cases := []struct {
+		name            string
+		inRate, outRate float64
+		durSeconds      int
+	}{
+		{"48to16_3s", 48000, 16000, 3},
+		{"48to32_3s", 48000, 32000, 3},
+		{"48to32_5s", 48000, 32000, 5},
+		{"44100to32_5s", 44100, 32000, 5},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := NewEngineFloat32(tc.inRate, tc.outRate, QualityMedium)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			inputLen := int(tc.inRate) * tc.durSeconds
+			input := make([]float32, inputLen)
+			for i := range input {
+				input[i] = float32(i) * 1e-5
+			}
+			output := make([]float32, r.EstimateOutput(inputLen))
+
+			// Warm up: let internal buffers grow to steady-state size.
+			r.Reset()
+			if _, err := r.ProcessInto(input, output); err != nil {
+				t.Fatal(err)
+			}
+
+			allocs := testing.AllocsPerRun(100, func() {
+				r.Reset()
+				_, _ = r.ProcessInto(input, output)
+			})
+
+			if allocs != 0 {
+				t.Fatalf("ProcessInto allocated %.0f times per call; expected 0", allocs)
+			}
+		})
+	}
+}
+
+// TestProcessFloat32Into_ZeroAllocs enforces the zero-allocation invariant for
+// the float32 New(...) batch path (constantRateResampler.ProcessFloat32Into).
+// This path converts float32<->float64 through grow-only scratch buffers, so it
+// is exercised as continuous warm streaming (no Reset between iterations) to
+// match the steady-state usage the scratch buffers are designed for.
+func TestProcessFloat32Into_ZeroAllocs(t *testing.T) {
+	cases := []struct {
+		name            string
+		inRate, outRate float64
+		durSeconds      int
+	}{
+		{"48to16_3s", 48000, 16000, 3},
+		{"48to32_3s", 48000, 32000, 3},
+		{"48to32_5s", 48000, 32000, 5},
+		{"44100to32_5s", 44100, 32000, 5},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := New(&Config{
+				InputRate:  tc.inRate,
+				OutputRate: tc.outRate,
+				Channels:   1,
+				Quality:    QualitySpec{Preset: QualityMedium},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, ok := raw.(processFloat32IntoResampler)
+			if !ok {
+				t.Fatal("New(...) result does not implement ProcessFloat32Into")
+			}
+
+			inputLen := int(tc.inRate) * tc.durSeconds
+			input := make([]float32, inputLen)
+			for i := range input {
+				input[i] = float32(i) * 1e-5
+			}
+			output := make([]float32, r.EstimateOutput(inputLen))
+
+			// Warm up: let internal ring buffers and scratch slices grow to
+			// steady-state size.
+			if _, err := r.ProcessFloat32Into(input, output); err != nil {
+				t.Fatal(err)
+			}
+
+			allocs := testing.AllocsPerRun(100, func() {
+				_, _ = r.ProcessFloat32Into(input, output)
+			})
+
+			if allocs != 0 {
+				t.Fatalf("ProcessFloat32Into allocated %.0f times per call; expected 0", allocs)
 			}
 		})
 	}

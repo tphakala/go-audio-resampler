@@ -320,6 +320,37 @@ func (r *SimpleResamplerFloat32) Process(input []float32) ([]float32, error) {
 	return r.engine.Process(input)
 }
 
+// ProcessInto resamples input into the caller-provided output buffer (float32).
+// It is the float32 mirror of SimpleResampler.ProcessInto: it writes up to
+// len(output) samples, returns the count, and returns ErrBufferTooSmall before
+// advancing state if output is too small to hold EstimateOutput(len(input))
+// samples. Because the underlying engine is float32-native, there is no float64
+// round-trip, so this path performs zero allocations once internal buffers have
+// warmed up. Use it for streaming float32 audio without per-call allocations.
+func (r *SimpleResamplerFloat32) ProcessInto(input, output []float32) (int, error) {
+	required := r.EstimateOutput(len(input))
+	if len(output) < required {
+		return 0, ErrBufferTooSmall
+	}
+
+	result, err := r.engine.ProcessZeroCopy(input)
+	if err != nil {
+		return 0, err
+	}
+	if len(output) < len(result) {
+		panic("go-audio-resampler: EstimateOutput underestimated actual output length")
+	}
+	copy(output, result)
+	return len(result), nil
+}
+
+// EstimateOutput returns an upper bound on the number of output samples that
+// ProcessInto will produce for an input of inputLen samples. It mirrors
+// SimpleResampler.EstimateOutput; callers use it to size the output buffer.
+func (r *SimpleResamplerFloat32) EstimateOutput(inputLen int) int {
+	return int(float64(inputLen)*r.engine.GetRatio()) + estimateOutputMargin
+}
+
 // Flush returns any remaining buffered samples as float32.
 // Unlike the main Resampler.Flush() which returns float64, this returns
 // float32 for a consistent float32 workflow.
