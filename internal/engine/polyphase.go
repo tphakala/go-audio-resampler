@@ -1372,7 +1372,7 @@ func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:u
 	// fixed-point at/step accumulator) does not reallocate in the steady state.
 	s.outputBuf = growStableLen(s.outputBuf, numOut)
 
-	// Hoist invariants out of the loop for better optimization
+	// Hoist invariants out of the loop for better optimization.
 	polyCoeffs := s.polyCoeffs
 	polyCoeffsB := s.polyCoeffsB
 	polyCoeffsC := s.polyCoeffsC
@@ -1384,10 +1384,30 @@ func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:u
 	histLen := len(history)
 	phaseFracMask := s.phaseFracMask
 
+	// Establish once that all four coefficient banks are at least numPhases long.
+	// They are allocated together with identical length (numPhases) in
+	// NewPolyphaseStage, so this never fires; it is a BCE hint. Combined with the
+	// in-loop phase guard (0 <= phase < numPhases), the compiler can chain
+	// phase < numPhases <= len(bank) and drop the per-bank, per-sample bounds
+	// checks on polyCoeffs[phase] .. polyCoeffsD[phase] without reslicing. If the
+	// invariant were ever violated we produce no output rather than panic.
+	if len(polyCoeffs) < numPhases || len(polyCoeffsB) < numPhases ||
+		len(polyCoeffsC) < numPhases || len(polyCoeffsD) < numPhases {
+		return []F{}, nil
+	}
+
+	// Write outputs through a local slice bounded to numOut (numOut == len(out)).
+	// The loop produces exactly numOut samples so out[outIdx] is always in range.
+	// The compiler still keeps a per-sample bounds check on the write because the
+	// loop is driven by the fixed-point accumulator (at < limit), not by outIdx,
+	// so it cannot relate outIdx to len(out). Leaving it; forcing it out would
+	// need a contorted loop shape for no measurable gain.
+	out := s.outputBuf[:numOut]
+
 	// Precompute scale factor for converting fractional bits to [0, 1)
 	fracScale := F(1.0 / float64(int64(1)<<phaseFracBits))
 
-	// Main resampling loop with cubic coefficient interpolation
+	// Main resampling loop with cubic coefficient interpolation.
 	at := s.at
 	outIdx := 0
 	for at < limit {
@@ -1404,6 +1424,15 @@ func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:u
 			break
 		}
 
+		// Establish phase is in [0, numPhases). Combined with the bank-length
+		// guard above (len(bank) >= numPhases), this lets the compiler remove the
+		// per-bank bounds checks on all four coefficient indexings below. phase is
+		// fullPhase % numPhases so this never fires for valid input; it is purely a
+		// BCE hint plus safety net.
+		if phase < 0 || phase >= numPhases {
+			break
+		}
+
 		coeffsA := polyCoeffs[phase]
 		coeffsB := polyCoeffsB[phase]
 		coeffsC := polyCoeffsC[phase]
@@ -1414,7 +1443,7 @@ func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:u
 		// Computes: sum = Σ hist[i] * (a[i] + x*(b[i] + x*(c[i] + x*d[i])))
 		sum := s.ops.CubicInterpDot(hist, coeffsA, coeffsB, coeffsC, coeffsD, x)
 
-		s.outputBuf[outIdx] = sum
+		out[outIdx] = sum
 		outIdx++
 		at += step
 	}
