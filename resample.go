@@ -312,7 +312,6 @@ type Info struct {
 	SIMDType string
 }
 
-// infoProvider is an optional interface for resamplers that can provide detailed info.
 // MultiFlusher is an optional interface for resamplers that support
 // multi-channel flushing. Use a type assertion to check support:
 //
@@ -326,6 +325,7 @@ type MultiFlusher interface {
 	FlushMulti() ([][]float64, error)
 }
 
+// infoProvider is an optional interface for resamplers that can provide detailed info.
 type infoProvider interface {
 	GetInfo() Info
 }
