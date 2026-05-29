@@ -30,8 +30,12 @@ jobs:
       # `go test -bench` also runs the full unit-test suite (in both checkouts),
       # which is what made this job time out at 10m. -benchtime/-count are kept
       # modest to keep the PR signal fast; benchstat still flags real regressions.
+      #
+      # Results are written to $RUNNER_TEMP, not the workspace: the "Checkout base"
+      # step below runs actions/checkout again, which cleans the working tree
+      # (git clean -ffdx) and would otherwise delete pr.bench before benchstat runs.
       - name: Run benchmarks on PR
-        run: go test -bench=. -benchmem -run='^$' -benchtime=100ms -count=6 -timeout=15m ./... | tee pr.bench
+        run: go test -bench=. -benchmem -run='^$' -benchtime=100ms -count=6 -timeout=15m ./... | tee "$RUNNER_TEMP/pr.bench"
 
       - name: Checkout base
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -39,7 +43,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Run benchmarks on base
-        run: go test -bench=. -benchmem -run='^$' -benchtime=100ms -count=6 -timeout=15m ./... | tee base.bench
+        run: go test -bench=. -benchmem -run='^$' -benchtime=100ms -count=6 -timeout=15m ./... | tee "$RUNNER_TEMP/base.bench"
 
       - name: Install benchstat
         run: go install golang.org/x/perf/cmd/benchstat@latest
@@ -49,7 +53,7 @@ jobs:
           echo '## Benchmark Comparison' > bench-report.md
           echo '' >> bench-report.md
           echo '```' >> bench-report.md
-          benchstat base.bench pr.bench >> bench-report.md 2>&1 || true
+          benchstat "$RUNNER_TEMP/base.bench" "$RUNNER_TEMP/pr.bench" >> bench-report.md 2>&1 || true
           echo '```' >> bench-report.md
 
       - name: Post benchmark results
