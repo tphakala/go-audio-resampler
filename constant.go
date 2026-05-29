@@ -24,9 +24,6 @@ type constantRateResampler struct {
 	// importable here, so the grow-only sizing is done inline.
 	f32in  []float64
 	f32out []float64
-
-	// Shared resources
-	mu sync.RWMutex
 }
 
 // channelResampler holds per-channel state.
@@ -267,10 +264,15 @@ func (r *constantRateResampler) processChannel(channel int, input []float64) ([]
 		inputBuffer := ch.buffers[i]
 		outputBuffer := ch.buffers[i+1]
 
-		// Process available input
-		for inputBuffer.Available() >= stage.GetMinInput() {
-			// Get input chunk
-			chunk := inputBuffer.Read(stage.GetMinInput())
+		// Read all available input in a single pass (matching processChannelInto)
+		// rather than looping over GetMinInput()-sized chunks. The stages are
+		// streaming-stateful, so chunk granularity does not affect the output
+		// (verified bit-identical by TestNewPath_ProcessInto_MatchesProcess), and
+		// one large read trims per-iteration overhead on this allocating path.
+		// Reading the whole buffer drains it in one go, so this is a single
+		// guarded read rather than a loop.
+		if avail := inputBuffer.Available(); avail >= stage.GetMinInput() {
+			chunk := inputBuffer.Read(avail)
 
 			// Process through stage
 			output, err := stage.Process(chunk)
@@ -392,9 +394,9 @@ func (r *constantRateResampler) GetLatency() int {
 
 // Reset clears all internal state.
 func (r *constantRateResampler) Reset() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
+	// No locking: doc.go documents that calls on a single instance must be
+	// serialized by the caller (standard for stateful streaming DSP), so a mutex
+	// here would protect nothing while falsely implying cross-method safety.
 	for _, ch := range r.channels {
 		// Reset all stages
 		for _, stage := range ch.stages {

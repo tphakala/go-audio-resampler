@@ -204,6 +204,14 @@ func ResampleMono(input []float64, inputRate, outputRate float64, quality Qualit
 		return nil, err
 	}
 
+	return resampleAll(r, input)
+}
+
+// resampleAll runs a complete one-shot resample (Process followed by Flush) on
+// the given engine and returns the concatenated output. The engine's Process and
+// Flush return owned (non-aliasing) buffers, so the result stays valid even if
+// the engine is subsequently Reset and reused for another channel.
+func resampleAll(r *SimpleResampler, input []float64) ([]float64, error) {
 	output, err := r.Process(input)
 	if err != nil {
 		return nil, err
@@ -220,14 +228,24 @@ func ResampleMono(input []float64, inputRate, outputRate float64, quality Qualit
 // ResampleStereo is a convenience function for one-shot stereo resampling.
 // Input is expected as [left, right] channels.
 func ResampleStereo(left, right []float64, inputRate, outputRate float64, quality QualityPreset) (leftOut, rightOut []float64, err error) {
-	// Process left channel
-	leftOut, err = ResampleMono(left, inputRate, outputRate, quality)
+	// Build the engine once and reuse it across both channels so the polyphase
+	// filter bank is only designed a single time. Reset() between channels
+	// clears the streaming state (history, phase, buffered tail) so the right
+	// channel is processed exactly as a fresh engine would, keeping the output
+	// bit-identical to two independent ResampleMono calls.
+	r, err := NewEngine(inputRate, outputRate, quality)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Process right channel
-	rightOut, err = ResampleMono(right, inputRate, outputRate, quality)
+	leftOut, err = resampleAll(r, left)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	r.Reset()
+
+	rightOut, err = resampleAll(r, right)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -389,6 +407,11 @@ func ResampleMonoFloat32(input []float32, inputRate, outputRate float64, quality
 		return nil, err
 	}
 
+	return resampleAllFloat32(r, input)
+}
+
+// resampleAllFloat32 is the float32 counterpart of resampleAll.
+func resampleAllFloat32(r *SimpleResamplerFloat32, input []float32) ([]float32, error) {
 	output, err := r.Process(input)
 	if err != nil {
 		return nil, err
@@ -407,14 +430,22 @@ func ResampleMonoFloat32(input []float32, inputRate, outputRate float64, quality
 //
 // This is the float32 equivalent of ResampleStereo.
 func ResampleStereoFloat32(left, right []float32, inputRate, outputRate float64, quality QualityPreset) (leftOut, rightOut []float32, err error) {
-	// Process left channel
-	leftOut, err = ResampleMonoFloat32(left, inputRate, outputRate, quality)
+	// Reuse one engine across both channels (see ResampleStereo) so the filter
+	// bank is designed once; Reset() between channels keeps the right channel
+	// bit-identical to an independent ResampleMonoFloat32 call.
+	r, err := NewEngineFloat32(inputRate, outputRate, quality)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Process right channel
-	rightOut, err = ResampleMonoFloat32(right, inputRate, outputRate, quality)
+	leftOut, err = resampleAllFloat32(r, left)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	r.Reset()
+
+	rightOut, err = resampleAllFloat32(r, right)
 	if err != nil {
 		return nil, nil, err
 	}
