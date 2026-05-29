@@ -342,23 +342,15 @@ func (r *constantRateResampler) processChannelInto(channel int, input, dst []flo
 }
 
 // Flush returns any remaining samples.
+// Flush drains channel 0's pipeline. Single-channel only: after
+// ProcessMulti, use FlushMulti to drain every channel.
 func (r *constantRateResampler) Flush() ([]float64, error) {
 	if len(r.channels) == 0 {
 		return []float64{}, nil
 	}
 
-	// Flush first channel for mono
 	ch := r.channels[0]
 
-	// Flush stages front to back. For each stage, first drain any input still
-	// pending in its input buffer (the tail the previous stage just flushed,
-	// plus any sub-GetMinInput residual left by processChannel) through the
-	// stage, then flush the stage's own delay line. Both outputs are written to
-	// the next stage's input buffer so the flushed tail propagates all the way
-	// to the final buffer. This mirrors the inter-stage routing in
-	// processChannel and engine.Resampler.Flush; without it the last stage
-	// boundary's flushed tail was left sitting in an intermediate buffer and
-	// dropped, shorting multi-stage pipelines by hundreds of samples (issue #37).
 	for i, stage := range ch.stages {
 		inputBuffer := ch.buffers[i]
 		outputBuffer := ch.buffers[i+1]
@@ -388,6 +380,46 @@ func (r *constantRateResampler) Flush() ([]float64, error) {
 	// Return all remaining output
 	finalBuffer := ch.buffers[len(ch.buffers)-1]
 	return finalBuffer.ReadAll(), nil
+}
+
+// FlushMulti flushes every channel's pipeline independently, returning one
+// slice per channel. The per-channel flush logic is identical to Flush.
+func (r *constantRateResampler) FlushMulti() ([][]float64, error) {
+	if len(r.channels) == 0 {
+		return [][]float64{}, nil
+	}
+
+	output := make([][]float64, len(r.channels))
+
+	for chIdx, ch := range r.channels {
+		for i, stage := range ch.stages {
+			inputBuffer := ch.buffers[i]
+			outputBuffer := ch.buffers[i+1]
+
+			if avail := inputBuffer.Available(); avail > 0 {
+				out, err := stage.Process(inputBuffer.Read(avail))
+				if err != nil {
+					return nil, fmt.Errorf("channel %d stage %d flush-process error: %w", chIdx, i, err)
+				}
+				if len(out) > 0 {
+					outputBuffer.Write(out)
+				}
+			}
+
+			out, err := stage.Flush()
+			if err != nil {
+				return nil, fmt.Errorf("channel %d stage %d flush error: %w", chIdx, i, err)
+			}
+			if len(out) > 0 {
+				outputBuffer.Write(out)
+			}
+		}
+
+		finalBuffer := ch.buffers[len(ch.buffers)-1]
+		output[chIdx] = finalBuffer.ReadAll()
+	}
+
+	return output, nil
 }
 
 // GetLatency returns the total pipeline latency in samples.
