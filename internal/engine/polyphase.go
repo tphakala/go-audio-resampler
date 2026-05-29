@@ -432,6 +432,19 @@ const (
 	// Buffer sizing constants.
 	historyBufferMultiplier = 2 // Extra capacity for history buffers
 
+	// Steady-state buffer growth slack.
+	//
+	// When the warm streaming buffers (history, outputBuf) need to grow, the
+	// required size jitters by a sample or two between calls because the
+	// fixed-point at/step accumulator drifts how much input each call consumes
+	// and how many output samples it produces. Allocating exactly the required
+	// size leaves no headroom, so the very next call's one-sample jitter trips
+	// another allocation. Growing with a fixed extra margin (and rounding the
+	// new capacity up) lets the buffer settle at a stable maximum after warmup,
+	// so steady-state ProcessInto reaches 0 allocs/op. The slack is a handful of
+	// samples; it does not change any output value, only the buffer capacity.
+	bufferGrowthSlack = 16
+
 	// Cache optimization constants.
 	// Process in chunks that fit in L2 cache (~256KB) for better cache efficiency.
 	// Chunk size chosen so signal + kernel + output all fit in L2.
@@ -529,6 +542,42 @@ func qualityToPassbandEnd(q Quality) float64 {
 	default:
 		return passbandHigh
 	}
+}
+
+// =============================================================================
+// Streaming buffer helpers
+// =============================================================================
+
+// growStableLen returns buf resliced to exactly n, reallocating only if the
+// current capacity is too small. When a reallocation is required it adds
+// bufferGrowthSlack headroom so that the inevitable one-sample jitter of the
+// fixed-point accumulator on the next call reuses the buffer instead of
+// reallocating. After warmup the capacity settles at a stable maximum and the
+// steady-state path performs no allocations. The contents of the first n
+// elements are not initialized by the caller's perspective beyond what Go
+// guarantees (zeroed on a fresh allocation, otherwise reused), which is fine
+// because both callers overwrite every element they read.
+func growStableLen[F simdops.Float](buf []F, n int) []F {
+	if cap(buf) < n {
+		return make([]F, n, n+bufferGrowthSlack)
+	}
+	return buf[:n]
+}
+
+// appendStable appends src to dst the same way the builtin append does, but
+// when a reallocation is needed it grows with bufferGrowthSlack headroom so a
+// subsequent one-sample jitter in the input run length does not trigger another
+// reallocation. The returned slice has the same length and element values as
+// append(dst, src...); only the capacity policy differs. After warmup the
+// capacity settles at a stable maximum so the streaming path stops allocating.
+func appendStable[F simdops.Float](dst, src []F) []F {
+	need := len(dst) + len(src)
+	if cap(dst) < need {
+		grown := make([]F, len(dst), need+bufferGrowthSlack)
+		copy(grown, dst)
+		dst = grown
+	}
+	return append(dst, src...)
 }
 
 // =============================================================================
@@ -683,8 +732,10 @@ func (s *DFTStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:unparam
 		return []F{}, nil
 	}
 
-	// Append input to history (no zero-insertion needed!)
-	s.history = append(s.history, input...)
+	// Append input to history (no zero-insertion needed!).
+	// appendStable grows with headroom so steady-state streaming does not
+	// reallocate when the run length jitters by a sample between calls.
+	s.history = appendStable(s.history, input)
 
 	numAvailable := len(s.history)
 	if numAvailable < s.tapsPerPhase {
@@ -696,12 +747,10 @@ func (s *DFTStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:unparam
 	// Each input sample produces 'factor' output samples
 	numOutput := numInputProcessable * s.factor
 
-	// Reuse output buffer to reduce allocations
-	if cap(s.outputBuf) < numOutput {
-		s.outputBuf = make([]F, numOutput)
-	} else {
-		s.outputBuf = s.outputBuf[:numOutput]
-	}
+	// Reuse output buffer to reduce allocations. growStableLen adds headroom
+	// when it must grow so that numOutput jitter between calls does not
+	// reallocate in the steady state.
+	s.outputBuf = growStableLen(s.outputBuf, numOutput)
 
 	factor := s.factor
 	history := s.history
@@ -1297,8 +1346,10 @@ func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:u
 
 	s.samplesIn += int64(len(input))
 
-	// Append input to history
-	s.history = append(s.history, input...)
+	// Append input to history.
+	// appendStable grows with headroom so steady-state streaming does not
+	// reallocate when the run length jitters by a sample between calls.
+	s.history = appendStable(s.history, input)
 
 	numIn := len(s.history) - s.tapsPerPhase + 1
 	if numIn <= 0 {
@@ -1316,12 +1367,10 @@ func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:u
 		return []F{}, nil
 	}
 
-	// Reuse output buffer to reduce allocations
-	if cap(s.outputBuf) < numOut {
-		s.outputBuf = make([]F, numOut)
-	} else {
-		s.outputBuf = s.outputBuf[:numOut]
-	}
+	// Reuse output buffer to reduce allocations. growStableLen adds headroom
+	// when it must grow so that numOut jitter between calls (driven by the
+	// fixed-point at/step accumulator) does not reallocate in the steady state.
+	s.outputBuf = growStableLen(s.outputBuf, numOut)
 
 	// Hoist invariants out of the loop for better optimization
 	polyCoeffs := s.polyCoeffs
