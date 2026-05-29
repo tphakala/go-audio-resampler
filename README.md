@@ -24,6 +24,7 @@ The library implements polyphase FIR filtering with Kaiser window design for pro
 - **Multi-channel support** - Process stereo, surround, and multi-channel audio (up to 256 channels)
 - **Parallel channel processing** - ~1.7x speedup for stereo, up to 8x for 7.1 surround audio
 - **Streaming API** - Process audio in chunks with proper state management
+- **Zero-allocation streaming** - Caller-owned output buffers (`ProcessInto` / `ProcessFloat32Into`) for float32 and float64 hot paths
 - **soxr-quality algorithms** - Implements libsoxr's multi-stage architecture for professional-grade quality
 
 ## Installation
@@ -32,7 +33,7 @@ The library implements polyphase FIR filtering with Kaiser window design for pro
 go get github.com/tphakala/go-audio-resampler
 ```
 
-Requires Go 1.25 or later.
+Requires Go 1.26 or later.
 
 ## Quick Start
 
@@ -143,6 +144,48 @@ if !ok {
 }
 ```
 
+#### Float32 zero-allocation streaming
+
+For float32 audio, `NewEngineFloat32` exposes a float32-native `ProcessInto`. The
+underlying engine is float32-native, so there is no float64 round-trip:
+
+```go
+r, err := resampling.NewEngineFloat32(48000, 32000, resampling.QualityMedium)
+if err != nil {
+    log.Fatal(err)
+}
+
+for chunk := range audioChunks {
+    out := make([]float32, r.EstimateOutput(len(chunk)))
+    n, err := r.ProcessInto(chunk, out)
+    if err != nil {
+        log.Fatal(err)
+    }
+    writeOutput(out[:n]) // Only out[:n] is valid
+}
+```
+
+When using `New(config)`, the float32 caller-owned-output method is
+`ProcessFloat32Into`. It runs through the float64 pipeline using reused scratch
+buffers, so it also reports 0 allocs/op once warm. Access it via type assertion:
+
+```go
+type processFloat32IntoResampler interface {
+    ProcessFloat32Into(input, output []float32) (int, error)
+    EstimateOutput(inputLen int) int
+}
+
+base, _ := resampling.New(config)
+into, ok := base.(processFloat32IntoResampler)
+if !ok {
+    log.Fatal("ProcessFloat32Into not available")
+}
+```
+
+Both float32 methods follow the same contract as float64 `ProcessInto`: size the
+output with `EstimateOutput(len(input))`, and on `ErrBufferTooSmall` no state is
+advanced (safe to retry with a larger buffer).
+
 ### Convenience Functions
 
 ```go
@@ -173,6 +216,36 @@ leftOut, rightOut, err := resampling.ResampleStereo(
 // Interleave/deinterleave helpers
 interleaved := resampling.InterleaveToStereo(left, right)
 left, right := resampling.DeinterleaveFromStereo(interleaved)
+```
+
+### Multi-Channel Streaming
+
+When streaming multi-channel audio with `ProcessMulti`, drain with `FlushMulti`
+rather than `Flush`. `Flush` only drains channel 0, so it would silently drop the
+delay-line tails of the remaining channels at end-of-stream:
+
+```go
+config := &resampling.Config{
+    InputRate:  44100,
+    OutputRate: 48000,
+    Channels:   6,
+    Quality:    resampling.QualitySpec{Preset: resampling.QualityHigh},
+}
+r, _ := resampling.New(config)
+
+for chunk := range multiChannelChunks { // chunk is [][]float64, one slice per channel
+    out, err := r.ProcessMulti(chunk)
+    if err != nil {
+        log.Fatal(err)
+    }
+    writeOutput(out)
+}
+
+// Drain every channel's tail (FlushMulti is an optional interface).
+if mf, ok := r.(resampling.MultiFlusher); ok {
+    tail, _ := mf.FlushMulti()
+    writeOutput(tail)
+}
 ```
 
 ## Quality Presets
@@ -223,15 +296,15 @@ config := &resampling.Config{
 
 ## Precision Modes (float32 vs float64)
 
-The library supports both float32 and float64 processing through Go generics:
+The library supports both float32 and float64 processing paths:
 
 ```go
 // float64 for maximum precision (default)
-r64, _ := engine.NewResampler[float64](44100, 48000, engine.QualityHigh)
+r64, _ := resampling.NewEngine(44100, 48000, resampling.QualityHigh)
 output64, _ := r64.Process(input64)
 
 // float32 for ~2x SIMD throughput
-r32, _ := engine.NewResampler[float32](44100, 48000, engine.QualityHigh)
+r32, _ := resampling.NewEngineFloat32(44100, 48000, resampling.QualityHigh)
 output32, _ := r32.Process(input32)
 ```
 
@@ -269,10 +342,17 @@ type Resampler interface {
     Process(input []float64) ([]float64, error)
     ProcessFloat32(input []float32) ([]float32, error)
     ProcessMulti(input [][]float64) ([][]float64, error)
-    Flush() ([]float64, error)
+    Flush() ([]float64, error) // drains channel 0 only; see MultiFlusher
     GetLatency() int
     Reset()
     GetRatio() float64
+}
+
+// Optional interface for draining every channel of a multi-channel stream.
+// Flush() only drains channel 0, so after ProcessMulti use FlushMulti to
+// avoid dropping the delay-line tails of channels 1..N-1.
+type MultiFlusher interface {
+    FlushMulti() ([][]float64, error)
 }
 
 // Configuration
@@ -369,9 +449,9 @@ Parallel processing is safe because each channel maintains independent filter st
 
 ## Dependencies
 
-- [github.com/tphakala/simd](https://github.com/tphakala/simd) - SIMD operations for filter convolution
-- [gonum.org/v1/gonum](https://gonum.org) - FFT for DFT stages
+- [github.com/tphakala/simd](https://github.com/tphakala/simd) - SIMD operations for filter convolution (the core library's only runtime dependency)
 - [github.com/go-audio/wav](https://github.com/go-audio/wav) - WAV file I/O (CLI tools only)
+- [github.com/go-audio/audio](https://github.com/go-audio/audio) - PCM buffer types (CLI tools only)
 
 ## Contributing
 
