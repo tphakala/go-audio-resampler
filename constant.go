@@ -350,16 +350,36 @@ func (r *constantRateResampler) Flush() ([]float64, error) {
 	// Flush first channel for mono
 	ch := r.channels[0]
 
-	// Flush each stage
+	// Flush stages front to back. For each stage, first drain any input still
+	// pending in its input buffer (the tail the previous stage just flushed,
+	// plus any sub-GetMinInput residual left by processChannel) through the
+	// stage, then flush the stage's own delay line. Both outputs are written to
+	// the next stage's input buffer so the flushed tail propagates all the way
+	// to the final buffer. This mirrors the inter-stage routing in
+	// processChannel and engine.Resampler.Flush; without it the last stage
+	// boundary's flushed tail was left sitting in an intermediate buffer and
+	// dropped, shorting multi-stage pipelines by hundreds of samples (issue #37).
 	for i, stage := range ch.stages {
+		inputBuffer := ch.buffers[i]
 		outputBuffer := ch.buffers[i+1]
 
-		// Flush the stage
+		// Run pending input (including the previous stage's flushed tail)
+		// through this stage before flushing it.
+		if avail := inputBuffer.Available(); avail > 0 {
+			output, err := stage.Process(inputBuffer.Read(avail))
+			if err != nil {
+				return nil, fmt.Errorf("stage %d flush-process error: %w", i, err)
+			}
+			if len(output) > 0 {
+				outputBuffer.Write(output)
+			}
+		}
+
+		// Flush the stage's internal delay line.
 		output, err := stage.Flush()
 		if err != nil {
 			return nil, fmt.Errorf("stage %d flush error: %w", i, err)
 		}
-
 		if len(output) > 0 {
 			outputBuffer.Write(output)
 		}
