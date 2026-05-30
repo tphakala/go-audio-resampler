@@ -74,23 +74,17 @@ var (
 
 // For returns the Ops instance for type F.
 // The type switch happens at instantiation time, not in hot paths.
+//
+// The Float constraint guarantees F is float32 or float64, so the type
+// assertions below cannot fail. A non-comma-ok assertion is used so there is
+// no unreachable error branch; an impossible mismatch would panic anyway.
 func For[F Float]() *Ops[F] {
 	var zero F
 	switch any(zero).(type) {
 	case float32:
-		ops, ok := any(&ops32).(*Ops[F])
-		if !ok {
-			panic("simdops: type assertion failed for float32")
-		}
-		return ops
-	case float64:
-		ops, ok := any(&ops64).(*Ops[F])
-		if !ok {
-			panic("simdops: type assertion failed for float64")
-		}
-		return ops
+		return any(&ops32).(*Ops[F]) //nolint:forcetypeassert // Float constraint guarantees F is float32 here
 	default:
-		panic("simdops: unsupported float type")
+		return any(&ops64).(*Ops[F]) //nolint:forcetypeassert // Float constraint guarantees F is float64 here
 	}
 }
 

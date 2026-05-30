@@ -104,3 +104,71 @@ func TestRingBufferReadIntoFullDrain(t *testing.T) {
 		t.Fatalf("expected zero reads on empty buffer, got=%d", n)
 	}
 }
+
+func TestRingBufferExtended(t *testing.T) {
+	// NewRingBuffer(0) clamps capacity to 1
+	b0 := NewRingBuffer(0)
+	if b0.Capacity() != 1 {
+		t.Fatalf("expected capacity to be clamped to 1, got %d", b0.Capacity())
+	}
+
+	b := NewRingBuffer(4)
+
+	// Write empty slice
+	b.Write([]float64{})
+	if b.Available() != 0 {
+		t.Fatalf("expected available to be 0, got %d", b.Available())
+	}
+
+	// Read from empty
+	rEmpty := b.Read(5)
+	assertFloat64SliceEqual(t, rEmpty, []float64{})
+
+	// Capacity, Space, Available
+	if b.Capacity() != 4 {
+		t.Fatalf("expected capacity 4, got %d", b.Capacity())
+	}
+	if b.Space() != 4 {
+		t.Fatalf("expected space 4, got %d", b.Space())
+	}
+
+	b.Write([]float64{1, 2})
+	if b.Available() != 2 {
+		t.Fatalf("expected available 2, got %d", b.Available())
+	}
+	if b.Space() != 2 {
+		t.Fatalf("expected space 2, got %d", b.Space())
+	}
+
+	// Read(0)
+	assertFloat64SliceEqual(t, b.Read(0), []float64{})
+
+	// Read(n > size)
+	assertFloat64SliceEqual(t, b.Read(5), []float64{1, 2})
+
+	// Clear
+	b.Write([]float64{3, 4})
+	b.Clear()
+	if b.Available() != 0 {
+		t.Fatalf("expected available 0 after Clear, got %d", b.Available())
+	}
+
+	// ReadAll
+	b.Write([]float64{5, 6, 7})
+	assertFloat64SliceEqual(t, b.ReadAll(), []float64{5, 6, 7})
+
+	// grow - contiguous layout path
+	bContig := NewRingBuffer(4)
+	bContig.Write([]float64{1, 2})    // readPos = 0, writePos = 2, size = 2
+	bContig.Write([]float64{3, 4, 5}) // size+needed = 2+3 = 5 > 4 capacity, triggers grow (contiguous)
+	assertFloat64SliceEqual(t, bContig.ReadAll(), []float64{1, 2, 3, 4, 5})
+
+	// grow - wrapped layout path
+	bWrapped := NewRingBuffer(4)
+	bWrapped.Write([]float64{1, 2, 3}) // readPos = 0, writePos = 3, size = 3
+	bWrapped.Read(2)                   // readPos = 2, writePos = 3, size = 1
+	bWrapped.Write([]float64{4, 5})    // readPos = 2, writePos = 1, size = 3 (wraps around)
+	// Now write more to trigger growth while wrapped (size=3, needed=2, total=5 > 4 capacity)
+	bWrapped.Write([]float64{6, 7})
+	assertFloat64SliceEqual(t, bWrapped.ReadAll(), []float64{3, 4, 5, 6, 7})
+}
