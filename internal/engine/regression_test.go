@@ -33,8 +33,14 @@ func TestRegressionDCGain(t *testing.T) {
 			input[i] = 1.0
 		}
 
-		output, _ := resampler.Process(input)
-		flush, _ := resampler.Flush()
+		output, err := resampler.Process(input)
+		if err != nil {
+			t.Fatalf("%.0f→%.0f: Process failed: %v", tc.inputRate, tc.outputRate, err)
+		}
+		flush, err := resampler.Flush()
+		if err != nil {
+			t.Fatalf("%.0f→%.0f: Flush failed: %v", tc.inputRate, tc.outputRate, err)
+		}
 		output = append(output, flush...)
 
 		// Skip initial latency, check stable region
@@ -87,8 +93,14 @@ func TestRegressionSineAmplitude(t *testing.T) {
 			input[i] = math.Sin(phase)
 		}
 
-		output, _ := resampler.Process(input)
-		flush, _ := resampler.Flush()
+		output, err := resampler.Process(input)
+		if err != nil {
+			t.Fatalf("%.0f→%.0f @%.0fHz: Process failed: %v", tc.inputRate, tc.outputRate, tc.frequency, err)
+		}
+		flush, err := resampler.Flush()
+		if err != nil {
+			t.Fatalf("%.0f→%.0f @%.0fHz: Flush failed: %v", tc.inputRate, tc.outputRate, tc.frequency, err)
+		}
 		output = append(output, flush...)
 
 		// Skip initial latency, find max amplitude in stable region
@@ -116,7 +128,10 @@ func TestRegressionSineAmplitude(t *testing.T) {
 
 // TestRegressionNoClipping verifies no clipping/overflow occurs
 func TestRegressionNoClipping(t *testing.T) {
-	resampler, _ := NewResampler[float64](44100, 48000, QualityHigh)
+	resampler, err := NewResampler[float64](44100, 48000, QualityHigh)
+	if err != nil {
+		t.Fatalf("NewResampler failed: %v", err)
+	}
 
 	// Generate maximum amplitude signal
 	numSamples := 10000
@@ -126,7 +141,10 @@ func TestRegressionNoClipping(t *testing.T) {
 		input[i] = math.Sin(phase)
 	}
 
-	output, _ := resampler.Process(input)
+	output, err := resampler.Process(input)
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
 
 	// Check no values exceed ±1.1 (allow small overshoot from filter ringing)
 	for i, v := range output {
@@ -140,10 +158,16 @@ func TestRegressionNoClipping(t *testing.T) {
 
 // TestRegressionZeroInput verifies zero input produces zero output
 func TestRegressionZeroInput(t *testing.T) {
-	resampler, _ := NewResampler[float64](44100, 48000, QualityHigh)
+	resampler, err := NewResampler[float64](44100, 48000, QualityHigh)
+	if err != nil {
+		t.Fatalf("NewResampler failed: %v", err)
+	}
 
 	input := make([]float64, 10000)
-	output, _ := resampler.Process(input)
+	output, err := resampler.Process(input)
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
 
 	// All output should be zero (or very close)
 	maxVal := 0.0
