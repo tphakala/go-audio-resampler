@@ -276,15 +276,20 @@ func resampleWAVGeneric[F Float](inputPath, outputPath string, targetRate int, q
 			break
 		}
 
+		// input.channels >= 1 is guaranteed by createWAVOutput/newFastWAVWriter
+		// above (which returns early on an invalid channel count), so this
+		// division cannot panic.
+		frames := n / input.channels
+
 		// Update tracking
-		buffers.intBuffer.Data = buffers.intBuffer.Data[:n*input.channels]
-		stats.inputSamples += int64(n)
+		buffers.intBuffer.Data = buffers.intBuffer.Data[:n]
+		stats.inputSamples += int64(frames)
 
 		// Deinterleave
 		deinterleaveInto(
 			buffers.intBuffer.Data,
 			buffers.channelBufs,
-			input.channels, n,
+			input.channels, frames,
 			buffers.invMaxVal,
 		)
 
@@ -292,7 +297,7 @@ func resampleWAVGeneric[F Float](inputPath, outputPath string, targetRate int, q
 		resampledChannels, err := resampleChannelData(
 			resamplers,
 			buffers.channelBufs,
-			n,
+			frames,
 			parallel,
 		)
 		if err != nil {
@@ -540,7 +545,22 @@ type fastWAVWriter struct {
 }
 
 // newFastWAVWriter creates a new fast WAV writer.
+//
+// channels must be >= 1 and bitDepth must be one of 16, 24, or 32. Rejecting
+// anything else here keeps the header byte math (bitDepth/bitsPerByte) exact,
+// avoids a negative-length byteBuf allocation, and prevents WriteSamples from
+// silently encoding at a different depth than the header advertises.
 func newFastWAVWriter(f *os.File, sampleRate, bitDepth, channels int) (*fastWAVWriter, error) {
+	if channels < 1 {
+		return nil, fmt.Errorf("invalid channel count %d: must be at least 1", channels)
+	}
+	switch bitDepth {
+	case bitsPerSample16, bitsPerSample24, bitsPerSample32:
+		// supported
+	default:
+		return nil, fmt.Errorf("unsupported bit depth %d: only 16, 24, and 32 are supported", bitDepth)
+	}
+
 	w := &fastWAVWriter{
 		w:          bufio.NewWriterSize(f, wavWriterBufferSize),
 		f:          f,
@@ -653,7 +673,7 @@ func (w *fastWAVWriter) WriteSamples(samples []int) error {
 	case bitsPerSample32:
 		return w.WriteSamples32(samples)
 	default:
-		return w.WriteSamples16(samples)
+		return fmt.Errorf("unsupported bit depth %d", w.bitDepth)
 	}
 }
 
