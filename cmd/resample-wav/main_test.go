@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"os"
 	"path/filepath"
@@ -230,19 +231,22 @@ func TestNewFastWAVWriter_Validation(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	tests := []struct {
-		name      string
-		bitDepth  int
-		channels  int
-		wantError bool
+		name       string
+		sampleRate int
+		bitDepth   int
+		channels   int
+		wantError  bool
 	}{
-		{"valid 16-bit stereo", 16, 2, false},
-		{"valid 24-bit mono", 24, 1, false},
-		{"valid 32-bit stereo", 32, 2, false},
-		{"unsupported 8-bit", 8, 2, true},
-		{"unsupported 20-bit", 20, 2, true},
-		{"zero bit depth", 0, 2, true},
-		{"zero channels", 16, 0, true},
-		{"negative channels", 16, -1, true},
+		{"valid 16-bit stereo", 44100, 16, 2, false},
+		{"valid 24-bit mono", 44100, 24, 1, false},
+		{"valid 32-bit stereo", 44100, 32, 2, false},
+		{"unsupported 8-bit", 44100, 8, 2, true},
+		{"unsupported 20-bit", 44100, 20, 2, true},
+		{"zero bit depth", 44100, 0, 2, true},
+		{"zero channels", 44100, 16, 0, true},
+		{"negative channels", 44100, 16, -1, true},
+		{"zero sample rate", 0, 16, 2, true},
+		{"negative sample rate", -44100, 16, 2, true},
 	}
 
 	for _, tt := range tests {
@@ -251,7 +255,7 @@ func TestNewFastWAVWriter_Validation(t *testing.T) {
 			require.NoError(t, err)
 			defer func() { _ = f.Close() }()
 
-			w, err := newFastWAVWriter(f, 44100, tt.bitDepth, tt.channels)
+			w, err := newFastWAVWriter(f, tt.sampleRate, tt.bitDepth, tt.channels)
 			if tt.wantError {
 				require.Error(t, err)
 				assert.Nil(t, w)
@@ -311,6 +315,50 @@ func TestResampleWAVGeneric_Success(t *testing.T) {
 	assert.Equal(t, 22050, stats32.outputRate)
 }
 
+// writeRawWAV writes a minimal 16-bit PCM WAV with the given parameters and raw
+// little-endian sample bytes. dataBytes need not be frame-aligned, which lets
+// tests exercise malformed input that the wav.Encoder cannot produce.
+func writeRawWAV(t *testing.T, path string, sampleRate, channels int, dataBytes []byte) {
+	t.Helper()
+	const bitsPerSample = 16
+	blockAlign := channels * bitsPerSample / 8
+	byteRate := sampleRate * blockAlign
+
+	buf := []byte("RIFF")
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(36+len(dataBytes))) // ChunkSize
+	buf = append(buf, "WAVE"...)
+	buf = append(buf, "fmt "...)
+	buf = binary.LittleEndian.AppendUint32(buf, 16)                 // Subchunk1Size
+	buf = binary.LittleEndian.AppendUint16(buf, 1)                  // AudioFormat (PCM)
+	buf = binary.LittleEndian.AppendUint16(buf, uint16(channels))   // NumChannels
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(sampleRate)) // SampleRate
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(byteRate))   // ByteRate
+	buf = binary.LittleEndian.AppendUint16(buf, uint16(blockAlign)) // BlockAlign
+	buf = binary.LittleEndian.AppendUint16(buf, bitsPerSample)      // BitsPerSample
+	buf = append(buf, "data"...)
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(len(dataBytes))) // Subchunk2Size
+	buf = append(buf, dataBytes...)
+
+	require.NoError(t, os.WriteFile(path, buf, 0o600))
+}
+
+// TestResampleWAVGeneric_NonFrameAlignedInput verifies that a multichannel file
+// whose sample count is not a whole number of frames is rejected rather than
+// silently dropping the partial frame.
+func TestResampleWAVGeneric_NonFrameAlignedInput(t *testing.T) {
+	tmpDir := t.TempDir()
+	inputPath := filepath.Join(tmpDir, "odd.wav")
+	outputPath := filepath.Join(tmpDir, "odd_out.wav")
+
+	// Stereo 16-bit: a frame is 4 bytes. 202 bytes is 101 samples = 50.5 frames,
+	// so PCMBuffer reports an odd sample count that is not divisible by 2.
+	writeRawWAV(t, inputPath, 44100, 2, make([]byte, 202))
+
+	_, err := resampleWAVFloat64(inputPath, outputPath, 48000, engine.QualityHigh, false, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "frame")
+}
+
 func TestRun_CLI(t *testing.T) {
 	tmpDir := t.TempDir()
 	inputPath := filepath.Join(tmpDir, "cli_input.wav")
@@ -320,8 +368,10 @@ func TestRun_CLI(t *testing.T) {
 
 	// Save original args/flags
 	origArgs := os.Args
+	origCommandLine := flag.CommandLine
 	defer func() {
 		os.Args = origArgs
+		flag.CommandLine = origCommandLine
 	}()
 
 	// 1. Test insufficient arguments

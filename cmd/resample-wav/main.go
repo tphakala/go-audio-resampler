@@ -278,7 +278,15 @@ func resampleWAVGeneric[F Float](inputPath, outputPath string, targetRate int, q
 
 		// input.channels >= 1 is guaranteed by createWAVOutput/newFastWAVWriter
 		// above (which returns early on an invalid channel count), so this
-		// division cannot panic.
+		// division cannot panic. A valid file always yields a sample count that
+		// is a whole number of frames; a non-divisible count means truncated or
+		// corrupt input, so fail fast instead of dropping the partial frame.
+		if n%input.channels != 0 {
+			return nil, fmt.Errorf(
+				"decoder returned %d samples, not a whole number of %d-channel frames",
+				n, input.channels,
+			)
+		}
 		frames := n / input.channels
 
 		// Update tracking
@@ -546,11 +554,15 @@ type fastWAVWriter struct {
 
 // newFastWAVWriter creates a new fast WAV writer.
 //
-// channels must be >= 1 and bitDepth must be one of 16, 24, or 32. Rejecting
-// anything else here keeps the header byte math (bitDepth/bitsPerByte) exact,
-// avoids a negative-length byteBuf allocation, and prevents WriteSamples from
-// silently encoding at a different depth than the header advertises.
+// sampleRate must be > 0, channels must be >= 1, and bitDepth must be one of
+// 16, 24, or 32. Rejecting anything else here keeps the header fields valid,
+// keeps the byte math (bitDepth/bitsPerByte) exact, avoids a negative-length
+// byteBuf allocation, and prevents WriteSamples from silently encoding at a
+// different depth than the header advertises.
 func newFastWAVWriter(f *os.File, sampleRate, bitDepth, channels int) (*fastWAVWriter, error) {
+	if sampleRate <= 0 {
+		return nil, fmt.Errorf("invalid sample rate %d: must be greater than 0", sampleRate)
+	}
 	if channels < 1 {
 		return nil, fmt.Errorf("invalid channel count %d: must be at least 1", channels)
 	}
