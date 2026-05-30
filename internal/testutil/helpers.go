@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Tomi P. Hakala
+// SPDX-License-Identifier: LGPL-2.1-or-later
+
 // Package testutil provides reusable test helper functions for audio resampler tests.
 package testutil
 

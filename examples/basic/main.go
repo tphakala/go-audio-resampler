@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Tomi P. Hakala
+// SPDX-License-Identifier: LGPL-2.1-or-later
+
 // Example: basic demonstrates simple audio resampling with go-audio-resampler.
 //
 // This example generates a 1kHz sine wave at 44.1kHz and resamples it to 48kHz.
