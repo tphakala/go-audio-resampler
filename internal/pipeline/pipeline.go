@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Tomi P. Hakala
+// SPDX-License-Identifier: LGPL-2.1-or-later
+
 // Package pipeline implements the multi-stage resampling pipeline architecture.
 // The pipeline automatically decomposes the resampling ratio into stages
 // that can be processed efficiently using different algorithms.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Tomi P. Hakala
+// SPDX-License-Identifier: LGPL-2.1-or-later
+
 // Package simdops provides generic SIMD operations for float32 and float64 types.
 // This enables a single codebase to support both precision levels without duplication.
 //

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Tomi P. Hakala
+// SPDX-License-Identifier: LGPL-2.1-or-later
+
 package mathutil
 
 // This file contains tests for quality preset parameters against soxr reference values.

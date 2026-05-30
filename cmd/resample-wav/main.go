@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Tomi P. Hakala
+// SPDX-License-Identifier: LGPL-2.1-or-later
+
 // Command resample-wav resamples WAV audio files to a target sample rate.
 //
 // Usage:
