@@ -247,6 +247,7 @@ func TestNewFastWAVWriter_Validation(t *testing.T) {
 		{"negative channels", 44100, 16, -1, true},
 		{"zero sample rate", 0, 16, 2, true},
 		{"negative sample rate", -44100, 16, 2, true},
+		{"channels overflow block align", 44100, 16, 40000, true},
 	}
 
 	for _, tt := range tests {

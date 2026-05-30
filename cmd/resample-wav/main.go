@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime/pprof"
@@ -571,6 +572,12 @@ func newFastWAVWriter(f *os.File, sampleRate, bitDepth, channels int) (*fastWAVW
 		// supported
 	default:
 		return nil, fmt.Errorf("unsupported bit depth %d: only 16, 24, and 32 are supported", bitDepth)
+	}
+	// NumChannels and BlockAlign are uint16 fields in the WAV header. Reject a
+	// channel count whose block alignment would overflow uint16, which would
+	// silently corrupt the header.
+	if channels*(bitDepth/bitsPerByte) > math.MaxUint16 {
+		return nil, fmt.Errorf("channel count %d is too large: block alignment exceeds the WAV uint16 limit", channels)
 	}
 
 	w := &fastWAVWriter{
