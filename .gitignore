@@ -51,3 +51,6 @@ REFACTOR_CHANGELOG.md
 
 # LEANN index
 .leann/
+
+# Serena project cache
+.serena/
