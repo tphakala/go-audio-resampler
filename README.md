@@ -1,16 +1,54 @@
-# go-audio-resampler
+<h1 align="center">go-audio-resampler</h1>
 
-[![CI](https://github.com/tphakala/go-audio-resampler/actions/workflows/ci.yml/badge.svg)](https://github.com/tphakala/go-audio-resampler/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/tphakala/go-audio-resampler/branch/master/graph/badge.svg)](https://codecov.io/gh/tphakala/go-audio-resampler)
-[![Go Reference](https://pkg.go.dev/badge/github.com/tphakala/go-audio-resampler.svg)](https://pkg.go.dev/github.com/tphakala/go-audio-resampler)
-[![Go Report Card](https://goreportcard.com/badge/github.com/tphakala/go-audio-resampler)](https://goreportcard.com/report/github.com/tphakala/go-audio-resampler)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/tphakala/go-audio-resampler/badge)](https://scorecard.dev/viewer/?uri=github.com/tphakala/go-audio-resampler)
+<p align="center">
+  <em>The only pure Go, high-quality audio resampler (that I know of). No CGO, no C toolchain, no build headaches.</em>
+</p>
 
-The **only pure Go** high-quality audio resampling library (that I know of) - **no CGO dependencies** required.
+<p align="center">
+  <!-- Project status -->
+  <img alt="Release" src="https://img.shields.io/github/v/release/tphakala/go-audio-resampler?sort=semver&label=release&color=blue">
+  <a href="LICENSE"><img alt="License: LGPL-2.1" src="https://img.shields.io/badge/license-LGPL--2.1-blue.svg"></a>
+  <img alt="Go version" src="https://img.shields.io/github/go-mod/go-version/tphakala/go-audio-resampler?label=go&logo=go&logoColor=white">
+  <img alt="Pure Go, no CGO" src="https://img.shields.io/badge/pure%20Go-no%20CGO-00ADD8?logo=go&logoColor=white">
+  <img alt="Platforms" src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WASM-lightgrey">
+</p>
+
+<p align="center">
+  <!-- CI and code quality -->
+  <a href="https://github.com/tphakala/go-audio-resampler/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/tphakala/go-audio-resampler/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/tphakala/go-audio-resampler/actions/workflows/govulncheck.yml"><img alt="govulncheck" src="https://github.com/tphakala/go-audio-resampler/actions/workflows/govulncheck.yml/badge.svg"></a>
+  <a href="https://codecov.io/gh/tphakala/go-audio-resampler"><img alt="codecov" src="https://codecov.io/gh/tphakala/go-audio-resampler/branch/master/graph/badge.svg"></a>
+  <a href="https://pkg.go.dev/github.com/tphakala/go-audio-resampler"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/tphakala/go-audio-resampler.svg"></a>
+  <a href="https://goreportcard.com/report/github.com/tphakala/go-audio-resampler"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/tphakala/go-audio-resampler"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/tphakala/go-audio-resampler"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/tphakala/go-audio-resampler/badge"></a>
+</p>
+
+<p align="center">
+  <!-- Community -->
+  <a href="https://github.com/sponsors/tphakala"><img alt="Sponsor" src="https://img.shields.io/github/sponsors/tphakala?label=Sponsor&logo=github&color=ea4aaa"></a>
+  <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg"></a>
+</p>
 
 Based on [libsoxr](https://sourceforge.net/projects/soxr/) (the SoX Resampler library) by Rob Sykes, this is a complete Go reimplementation delivering professional-grade quality without any C code or external dependencies.
 
 The library implements polyphase FIR filtering with Kaiser window design for professional-grade sample rate conversion, following the multi-stage architecture that makes libsoxr one of the highest-quality resamplers available.
+
+## Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Quality Presets](#quality-presets)
+- [Precision Modes (float32 vs float64)](#precision-modes-float32-vs-float64)
+- [Architecture](#architecture)
+- [API Reference](#api-reference)
+- [Command-Line Tools](#command-line-tools)
+- [Performance](#performance)
+- [Dependencies](#dependencies)
+- [Contributing](#contributing)
+- [Sponsor](#sponsor)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
 
 ## Features
 
@@ -474,6 +512,14 @@ Contributions are welcome! Please:
 3. Add tests for new functionality
 4. Ensure `go test ./...` passes
 5. Submit a pull request
+
+## Sponsor
+
+Pure Go audio DSP is a small niche, and keeping this library correct, fast, and matched to libsoxr quality takes ongoing work. If it saves you from wrestling with CGO and C toolchains, please consider sponsoring its development.
+
+[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor%20on-GitHub-ea4aaa?logo=github&logoColor=white)](https://github.com/sponsors/tphakala)
+
+Every sponsorship, large or small, is appreciated and helps me dedicate time to maintenance, new features, and support.
 
 ## License
 
