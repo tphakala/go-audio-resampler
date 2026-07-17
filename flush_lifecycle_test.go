@@ -5,6 +5,7 @@ package resampler
 
 import (
 	"math"
+	"slices"
 	"testing"
 )
 
@@ -56,11 +57,11 @@ func TestFlushLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		chunk := sineChunk(4410, c.in)
-		gotAfterFlush, err := r.Process(append([]float64(nil), chunk...))
+		gotAfterFlush, err := r.Process(slices.Clone(chunk))
 		if err != nil {
 			t.Fatal(err)
 		}
-		gotFresh, err := fresh.Process(append([]float64(nil), chunk...))
+		gotFresh, err := fresh.Process(slices.Clone(chunk))
 		if err != nil {
 			t.Fatal(err)
 		}

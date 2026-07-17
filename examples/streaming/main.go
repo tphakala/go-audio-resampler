@@ -21,9 +21,12 @@ import (
 
 func main() {
 	const (
-		inRate    = 44100.0
-		outRate   = 48000.0
-		outFrames = 512
+		inRate        = 44100.0
+		outRate       = 48000.0
+		outFrames     = 512
+		callbacks     = 100
+		toneAmplitude = 0.5
+		toneHz        = 997.0
 	)
 
 	rs, err := resampler.NewEngineFloat32(inRate, outRate, resampler.QualityHigh)
@@ -34,12 +37,14 @@ func main() {
 
 	// Prime the FIFO with the startup deficit so the first callbacks are
 	// fed. This trades Latency() samples of leading silence for a steady
-	// pipeline.
-	fifo := make([]float32, rs.Latency())
+	// pipeline. The FIFO starts empty with headroom, then the priming zeros
+	// are appended so later appends grow a zero-length-origin slice.
+	fifo := make([]float32, 0, rs.Latency()+2*outFrames)
+	fifo = append(fifo, make([]float32, rs.Latency())...)
 
 	phase := 0.0
 	firstCall := true
-	for callback := 0; callback < 100; callback++ {
+	for callback := range callbacks {
 		// Size the input chunk from the FIFO's current deficit rather than
 		// a fixed count. A fixed input size drifts against a fixed output
 		// size whenever ratio does not divide outFrames evenly: truncating
@@ -64,10 +69,7 @@ func main() {
 		// below tolerates that warmup.
 		need := outFrames
 		if !firstCall {
-			need = outFrames - len(fifo)
-			if need < 0 {
-				need = 0
-			}
+			need = max(outFrames-len(fifo), 0)
 		}
 		firstCall = false
 		inFrames := int(math.Ceil(float64(need) / ratio))
@@ -76,8 +78,8 @@ func main() {
 		// reuse a single scratch buffer instead of allocating each call.
 		in := make([]float32, inFrames)
 		for i := range in {
-			in[i] = float32(0.5 * math.Sin(phase))
-			phase += 2 * math.Pi * 997 / inRate
+			in[i] = float32(toneAmplitude * math.Sin(phase))
+			phase += 2 * math.Pi * toneHz / inRate
 		}
 		out, err := rs.Process(in)
 		if err != nil {

@@ -41,7 +41,7 @@ func TestStreamingEquivalence_Float64(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: NewEngine: %v", rr.name, err)
 			}
-			ref, err := oneShot.Process(append([]float64(nil), input...))
+			ref, err := oneShot.Process(slices.Clone(input))
 			if err != nil {
 				t.Fatalf("%s: Process: %v", rr.name, err)
 			}
@@ -52,40 +52,48 @@ func TestStreamingEquivalence_Float64(t *testing.T) {
 			ref = append(ref, refTail...)
 
 			for pi, plan := range chunkPlans {
-				chunked, err := NewEngine(rr.in, rr.out, q)
-				if err != nil {
-					t.Fatalf("%s: NewEngine: %v", rr.name, err)
-				}
-				var got []float64
-				rng := rand.New(rand.NewSource(int64(pi) + 1))
-				pos := 0
-				for pos < n {
-					size := plan[rng.Intn(len(plan))]
-					if pos+size > n {
-						size = n - pos
-					}
-					out, err := chunked.Process(append([]float64(nil), input[pos:pos+size]...))
-					if err != nil {
-						t.Fatalf("%s plan %d: Process: %v", rr.name, pi, err)
-					}
-					got = append(got, out...)
-					pos += size
-				}
-				tail, err := chunked.Flush()
-				if err != nil {
-					t.Fatalf("%s plan %d: Flush: %v", rr.name, pi, err)
-				}
-				got = append(got, tail...)
-
-				if len(got) != len(ref) {
-					t.Fatalf("%s q=%v plan %d: length %d != one-shot %d", rr.name, q, pi, len(got), len(ref))
-				}
-				for i := range got {
-					if got[i] != ref[i] {
-						t.Fatalf("%s q=%v plan %d: sample %d differs: %g != %g", rr.name, q, pi, i, got[i], ref[i])
-					}
-				}
+				assertChunkedPlanEqualsFloat64(t, rr.name, rr.in, rr.out, q, pi, plan, input, ref)
 			}
+		}
+	}
+}
+
+// assertChunkedPlanEqualsFloat64 feeds input through a fresh engine in
+// pseudo-random chunk sizes drawn from plan (seeded by pi for reproducibility),
+// Flushes once, and asserts the result is bit-exact with ref.
+func assertChunkedPlanEqualsFloat64(t *testing.T, name string, in, out float64, q QualityPreset, pi int, plan []int, input, ref []float64) {
+	t.Helper()
+
+	chunked, err := NewEngine(in, out, q)
+	if err != nil {
+		t.Fatalf("%s: NewEngine: %v", name, err)
+	}
+	var got []float64
+	rng := rand.New(rand.NewSource(int64(pi) + 1))
+	for pos := 0; pos < len(input); {
+		size := plan[rng.Intn(len(plan))]
+		if pos+size > len(input) {
+			size = len(input) - pos
+		}
+		outChunk, err := chunked.Process(slices.Clone(input[pos : pos+size]))
+		if err != nil {
+			t.Fatalf("%s plan %d: Process: %v", name, pi, err)
+		}
+		got = append(got, outChunk...)
+		pos += size
+	}
+	tail, err := chunked.Flush()
+	if err != nil {
+		t.Fatalf("%s plan %d: Flush: %v", name, pi, err)
+	}
+	got = append(got, tail...)
+
+	if len(got) != len(ref) {
+		t.Fatalf("%s q=%v plan %d: length %d != one-shot %d", name, q, pi, len(got), len(ref))
+	}
+	for i := range got {
+		if got[i] != ref[i] {
+			t.Fatalf("%s q=%v plan %d: sample %d differs: %g != %g", name, q, pi, i, got[i], ref[i])
 		}
 	}
 }
