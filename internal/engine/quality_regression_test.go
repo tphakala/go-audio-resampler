@@ -44,6 +44,15 @@ const (
 	regressionMaxTHD_High     = -140.0 // dB (actual: ~-157 dB)
 	regressionMaxTHD_VeryHigh = -140.0 // dB (actual: ~-162 dB)
 
+	// Active-interpolation ratio THD limits (#54). Measured on 2026-07-17:
+	// 32000->44100 High: -162.05 dB, Medium: -134.95 dB, Low: -144.22 dB;
+	// 44100->64000 High: -151.63 dB, Medium: -135.03 dB, Low: -139.47 dB.
+	// Limits are measured values rounded up with ~5 dB margin. Medium and Low
+	// reuse the regressionMaxTHD_Medium and regressionMaxTHD_Low constants
+	// above since the measured values here fall within margin of those
+	// existing constants; only High needed a dedicated, tighter limit.
+	regressionMaxTHDInterp_High = -145.0 // dB (worst measured: -151.63 dB)
+
 	// Minimum SNR at 1kHz test frequency (more positive = better)
 	// Calibrated: actual SNR varies by conversion type (40-104 dB)
 	regressionMinSNR_Quick    = 35.0 // dB (actual: ~43 dB)
@@ -138,6 +147,43 @@ func TestQualityRegression_THD(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
+		name := qualityName(tc.quality) + "/" + formatRatio(tc.inputRate, tc.outputRate)
+		t.Run(name, func(t *testing.T) {
+			thd := measureTHDInternal(t, tc.inputRate, tc.outputRate, tc.testFreq, tc.quality)
+
+			// THD in dB: more negative is better
+			// If thd > maxTHD, it's worse (regression)
+			if thd > tc.maxTHD {
+				t.Errorf("THD REGRESSION: got %.2f dB, want <= %.2f dB", thd, tc.maxTHD)
+			} else {
+				t.Logf("THD: %.2f dB (threshold: %.2f dB) ✓", thd, tc.maxTHD)
+			}
+		})
+	}
+}
+
+// Active-interpolation THD regression (#54): unlike the exact-rational
+// ratios above, these ratios consult the sub-phase Catmull-Rom
+// interpolation banks, so this pins the whole pipeline against the
+// phase-boundary indexing defect fixed in #56 (stage-level guard:
+// phase_wrap_measure_test.go). Thresholds are measured values plus margin;
+// see constants.
+func TestQualityRegression_THD_ActiveInterpolation(t *testing.T) {
+	tests := []struct {
+		inputRate, outputRate float64
+		testFreq              float64
+		quality               Quality
+		maxTHD                float64
+	}{
+		{32000, 44100, 1000, QualityHigh, regressionMaxTHDInterp_High},
+		{32000, 44100, 1000, QualityMedium, regressionMaxTHD_Medium},
+		{32000, 44100, 1000, QualityLow, regressionMaxTHD_Low},
+		{44100, 64000, 1000, QualityHigh, regressionMaxTHDInterp_High},
+		{44100, 64000, 1000, QualityMedium, regressionMaxTHD_Medium},
+		{44100, 64000, 1000, QualityLow, regressionMaxTHD_Low},
+	}
+
+	for _, tc := range tests {
 		name := qualityName(tc.quality) + "/" + formatRatio(tc.inputRate, tc.outputRate)
 		t.Run(name, func(t *testing.T) {
 			thd := measureTHDInternal(t, tc.inputRate, tc.outputRate, tc.testFreq, tc.quality)
@@ -501,4 +547,3 @@ func measurePassbandRippleInternal(t *testing.T, inputRate, outputRate float64, 
 
 	return maxDev - minDev
 }
-
