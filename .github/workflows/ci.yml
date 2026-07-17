@@ -63,7 +63,6 @@ jobs:
         run: |
           go build ./cmd/resample-wav
           go build ./cmd/resample
-          go build ./cmd/analyze-filter
       - name: Verify go.mod is tidy
         run: |
           go mod tidy

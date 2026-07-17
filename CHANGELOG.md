@@ -57,6 +57,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   interpolation (matching `New()` and the documented contract) instead of a
   full FIR pipeline; latency drops accordingly. (#51)
 
+### Removed
+
+- The internal duplicate polyphase filter design path
+  (`internal/filter/polyphase.go`) and the `cmd/analyze-filter` diagnostic
+  that consumed it; the engine's design code in `internal/engine` is the
+  single polyphase implementation. (#55)
+- The production-dead `LinearStage` from `internal/engine`; only its own
+  tests referenced it. (#55)
+
 ## [1.4.0] - 2026-05-29
 
 ### Added

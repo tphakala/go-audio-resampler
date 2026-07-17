@@ -84,15 +84,6 @@ func TestCubicStage_EmptyInput(t *testing.T) {
 	assert.Empty(t, output, "Output should be empty for empty input")
 }
 
-// TestLinearStage_EmptyInput verifies LinearStage handles empty input correctly.
-func TestLinearStage_EmptyInput(t *testing.T) {
-	stage := NewLinearStage(2.0)
-
-	output, err := stage.Process([]float64{})
-	require.NoError(t, err, "Process() with empty input should not error")
-	assert.Empty(t, output, "Output should be empty for empty input")
-}
-
 // =============================================================================
 // Single Sample Tests
 // =============================================================================
