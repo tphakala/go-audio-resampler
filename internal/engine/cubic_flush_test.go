@@ -58,6 +58,103 @@ func TestCubicStage_FlushEmitsTail(t *testing.T) {
 	}
 }
 
+// The flushed tail must contain the real trailing segments (centered on
+// x[n-2] and x[n-1]), not garbage: its first sample should still track the
+// ramp's final value, with later samples decaying toward the zero padding.
+//
+// This deliberately does not reuse TestCubicStage_FlushEmitsTail's unbounded
+// 0..4409 ramp. That ramp is well suited to the head check (early values are
+// widely spaced integers, so a fictional-zero head is obviously distinct
+// from a correct one) but poorly suited to a tail check: its final value is
+// thousands of units away from the zero Flush pads in, and cubic
+// interpolation's polynomial fit overshoots substantially in the interior of
+// a segment spanning that large a discontinuity (its endpoints stay exact;
+// only the interior curve swings, by hundreds of units for that ramp's
+// scale) even on the already-fixed implementation. This is the same known,
+// minor characteristic documented on CubicStage.Flush, not a defect; a
+// bounded ramp keeps the discontinuity small enough that tail values are
+// checkable with a tight, meaningful tolerance instead of one loose enough
+// to hide a real regression.
+func TestCubicStage_FlushTailTracksRamp(t *testing.T) {
+	c := NewCubicStage[float64](48000.0 / 44100.0)
+	const n = 4410
+	in := make([]float64, n)
+	for i := range in {
+		in[i] = float64(i) / float64(n-1) // bounded 0..1 ramp
+	}
+	if _, err := c.Process(in); err != nil {
+		t.Fatal(err)
+	}
+	tail, err := c.Flush()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tail) == 0 {
+		t.Fatal("Flush returned no samples; nothing to check")
+	}
+
+	const tolerance = 0.1
+	last := in[n-1]
+	if math.Abs(tail[0]-last) > tolerance {
+		t.Errorf("tail[0] = %v, want within %v of ramp end %v (real tail, not dropped)", tail[0], tolerance, last)
+	}
+	if math.Abs(tail[len(tail)-1]) > tolerance {
+		t.Errorf("final tail sample = %v, want within %v of 0 (decayed toward the zero padding)", tail[len(tail)-1], tolerance)
+	}
+}
+
+// Process exactly one real sample (0 < primed < cubicLatencySamples), then
+// Flush. This is the partially-primed edge: the interpolator never reaches
+// the priming threshold during Process, so Flush's own zero padding must
+// both finish priming and drain the single real sample, without a panic and
+// without breaking the terminal-flush lifecycle.
+func TestCubicStage_FlushAfterPartialPriming(t *testing.T) {
+	c := NewCubicStage[float64](48000.0 / 44100.0)
+
+	out, err := c.Process([]float64{42.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tail, err := c.Flush()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	total := len(out) + len(tail)
+	n := 1 // runtime variable: 1*48000/44100 isn't an exact integer constant
+	ideal := int(float64(n) * 48000.0 / 44100.0)
+	if total < ideal-1 || total > ideal+1 {
+		t.Errorf("partially primed Process+Flush total %d, want %d +-1", total, ideal)
+	}
+
+	second, err := c.Flush()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 0 {
+		t.Errorf("second Flush returned %d samples, want 0", len(second))
+	}
+
+	fresh := NewCubicStage[float64](48000.0 / 44100.0)
+	freshOut, err := fresh.Process([]float64{42.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotAfterFlush, err := c.Process([]float64{42.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotAfterFlush) != len(freshOut) {
+		t.Fatalf("post-flush Process length %d != fresh %d", len(gotAfterFlush), len(freshOut))
+	}
+	for i := range freshOut {
+		if gotAfterFlush[i] != freshOut[i] {
+			t.Fatalf("post-flush Process differs from fresh at %d", i)
+		}
+	}
+}
+
 // Flush must drain the true tail, not just leave the stage silently short:
 // after real input has primed the interpolator, Flush must return samples.
 func TestCubicStage_FlushIsNonEmptyAfterRealInput(t *testing.T) {
