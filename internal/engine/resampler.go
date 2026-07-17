@@ -49,8 +49,8 @@ type Resampler[F simdops.Float] struct {
 //   - For integer ratios: Uses only DFT stage
 //   - For non-integer ratios: Uses DFT pre-stage (2×) + polyphase stage
 func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Quality) (*Resampler[F], error) {
-	if inputRate <= 0 || outputRate <= 0 {
-		return nil, fmt.Errorf("sample rates must be positive: input=%f, output=%f", inputRate, outputRate)
+	if !(inputRate > 0) || !(outputRate > 0) {
+		return nil, fmt.Errorf("sample rates must be positive finite numbers: input=%f, output=%f", inputRate, outputRate)
 	}
 
 	ratio := outputRate / inputRate
@@ -59,9 +59,11 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 	// Following SOXR's pattern: ratios between 1/256 and 256 are practical for audio.
 	// Extreme ratios can cause: (1) integer overflow in output size calculation,
 	// (2) memory exhaustion from attempting to allocate huge output buffers.
+	// The checks are expressed positively so a NaN ratio (e.g. from Inf/Inf)
+	// fails validation instead of silently passing every comparison.
 	const minRatio = 1.0 / 256.0 // 256x downsampling
 	const maxRatio = 256.0       // 256x upsampling
-	if ratio < minRatio || ratio > maxRatio {
+	if !(ratio >= minRatio && ratio <= maxRatio) {
 		return nil, fmt.Errorf("resampling ratio %.6f out of valid range [%.6f, %.0f]", ratio, minRatio, maxRatio)
 	}
 	ops := simdops.For[F]()
