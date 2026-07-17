@@ -53,6 +53,16 @@ func (s *StageAdapter[F]) GetLatency() int {
 		latency += s.polyphaseStage.tapsPerPhase / latencyDivisor
 	}
 
+	// DFT decimation stage latency
+	if s.decimationStage != nil {
+		latency += s.decimationStage.numTaps / latencyDivisor
+	}
+
+	// Cubic interpolation stage latency
+	if s.cubicStage != nil {
+		latency += cubicLatencySamples
+	}
+
 	return latency
 }
 

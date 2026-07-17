@@ -185,6 +185,14 @@ func (r *SimpleResampler) GetStatistics() map[string]int64 {
 	return r.engine.GetStatistics()
 }
 
+// Latency returns the resampler's startup deficit in output samples: the
+// number of samples early Process calls withhold while the internal filter
+// primes. Real-time users feeding fixed-size output buffers should prime
+// their FIFO with this many samples of silence.
+func (r *SimpleResampler) Latency() int {
+	return r.engine.Latency()
+}
+
 // presetToEngineQuality converts a QualityPreset to engine.Quality.
 func presetToEngineQuality(preset QualityPreset) engine.Quality {
 	switch preset {
@@ -392,6 +400,14 @@ func (r *SimpleResamplerFloat32) GetRatio() float64 {
 // GetStatistics returns processing statistics including samples processed.
 func (r *SimpleResamplerFloat32) GetStatistics() map[string]int64 {
 	return r.engine.GetStatistics()
+}
+
+// Latency returns the resampler's startup deficit in output samples: the
+// number of samples early Process calls withhold while the internal filter
+// primes. Real-time users feeding fixed-size output buffers should prime
+// their FIFO with this many samples of silence.
+func (r *SimpleResamplerFloat32) Latency() int {
+	return r.engine.Latency()
 }
 
 // ResampleMonoFloat32 is a convenience function for one-shot mono resampling

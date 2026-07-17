@@ -354,6 +354,31 @@ func (r *Resampler[F]) GetStatistics() map[string]int64 {
 	}
 }
 
+// Latency returns the startup deficit in output samples: how many samples
+// the first Process calls withhold while the filter delay lines prime.
+// Real-time consumers should prime their output FIFO with this many samples
+// of silence to keep fixed-size callbacks fed.
+func (r *Resampler[F]) Latency() int {
+	deficitIn := 0.0
+	if r.cubicStage != nil {
+		return int(math.Ceil(cubicLatencySamples * r.ratio))
+	}
+	if r.preStage != nil && r.preStage.factor > 1 {
+		deficitIn += float64(r.preStage.tapsPerPhase - 1)
+	}
+	if r.decimationStage != nil {
+		deficitIn += float64(r.decimationStage.numTaps - 1)
+	}
+	if r.polyphaseStage != nil {
+		intermediateFactor := 1.0
+		if r.preStage != nil && r.preStage.factor > 1 {
+			intermediateFactor = float64(r.preStage.factor)
+		}
+		deficitIn += float64(r.polyphaseStage.tapsPerPhase-1) / intermediateFactor
+	}
+	return int(math.Ceil(deficitIn * r.ratio))
+}
+
 // isIntegerRatio checks if the ratio is an integer (within tolerance).
 func isIntegerRatio(ratio float64) bool {
 	const tolerance = 1e-9
