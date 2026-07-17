@@ -68,3 +68,48 @@ func TestLatencyFloat32_MatchesMeasuredDeficit(t *testing.T) {
 		}
 	}
 }
+
+// GetLatency on the New(config) multi-stage path must report the startup
+// deficit in output samples, like SimpleResampler.Latency does for the
+// engine path. Guards against the domain-mixing error fixed in #52.
+func TestGetLatency_ConfigPath_MatchesMeasuredDeficit(t *testing.T) {
+	for _, c := range []struct{ in, out float64 }{
+		{44100, 48000},
+		{44100, 96000},
+		{48000, 44100},
+	} {
+		for _, preset := range []QualityPreset{QualityLow, QualityMedium, QualityHigh} {
+			cfg := Config{
+				InputRate:  c.in,
+				OutputRate: c.out,
+				Channels:   1,
+				Quality:    QualitySpec{Preset: preset},
+			}
+			r, err := New(&cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const n = 44100
+			in := make([]float64, n)
+			for i := range in {
+				in[i] = 0.5 * math.Sin(2*math.Pi*997*float64(i)/c.in)
+			}
+			out, err := r.Process(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			measured := int(float64(n)*c.out/c.in) - len(out)
+			got := r.GetLatency()
+			// The accumulated fractional deficit is rounded up once with
+			// math.Ceil, so GetLatency lands one or two samples above the
+			// measured deficit (observed max 2 across these rows). tol stays
+			// well below the old domain-mixing error, which under-reported
+			// the two-stage 44100->96000 case by 31 (672 versus 703).
+			const tol = 4
+			if got < measured-tol || got > measured+tol {
+				t.Errorf("%v to %v %v: GetLatency()=%d, measured deficit %d",
+					c.in, c.out, preset, got, measured)
+			}
+		}
+	}
+}

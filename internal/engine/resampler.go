@@ -365,13 +365,14 @@ func (r *Resampler[F]) GetStatistics() map[string]int64 {
 	}
 }
 
-// Latency returns the startup deficit in output samples: how many samples
-// the first Process calls withhold while the filter delay lines prime.
-// Real-time consumers should prime their output FIFO with this many samples
-// of silence to keep fixed-size callbacks fed.
-func (r *Resampler[F]) Latency() int {
+// StartupDeficit returns the startup deficit in output samples, un-rounded.
+// It exists so multi-stage pipelines can accumulate each stage's fractional
+// deficit and round once at the end, avoiding the per-stage rounding error
+// that accrues when every stage rounds to an integer before summing. Latency
+// wraps this with math.Ceil.
+func (r *Resampler[F]) StartupDeficit() float64 {
 	if r.cubicStage != nil {
-		return int(math.Ceil(cubicLatencySamples * r.ratio))
+		return cubicLatencySamples * r.ratio
 	}
 	deficitIn := 0.0
 	if r.preStage != nil && r.preStage.factor > 1 {
@@ -387,7 +388,15 @@ func (r *Resampler[F]) Latency() int {
 		}
 		deficitIn += float64(r.polyphaseStage.tapsPerPhase-1) / intermediateFactor
 	}
-	return int(math.Ceil(deficitIn * r.ratio))
+	return deficitIn * r.ratio
+}
+
+// Latency returns the startup deficit in output samples: how many samples
+// the first Process calls withhold while the filter delay lines prime.
+// Real-time consumers should prime their output FIFO with this many samples
+// of silence to keep fixed-size callbacks fed.
+func (r *Resampler[F]) Latency() int {
+	return int(math.Ceil(r.StartupDeficit()))
 }
 
 // isIntegerRatio checks if the ratio is an integer (within tolerance).

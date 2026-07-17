@@ -31,8 +31,10 @@ type Resampler interface {
 	// MultiFlusher interface instead to drain every channel.
 	Flush() ([]float64, error)
 
-	// GetLatency returns the resampler latency in samples.
-	// This is the delay between input and output due to filtering.
+	// GetLatency returns the startup deficit in output samples: how many
+	// samples early Process calls withhold while internal filters prime.
+	// Real-time users can prime an output FIFO with this many samples of
+	// silence.
 	GetLatency() int
 
 	// Reset clears all internal state and buffers.

@@ -192,6 +192,12 @@ func (c *CubicStage[F]) GetMemoryUsage() int64 {
 	return cubicMemoryUsage
 }
 
+// StartupDeficit returns the startup deficit in output samples, un-rounded.
+// Mirrors the cubic branch of Resampler.Latency for direct pipeline use.
+func (c *CubicStage[F]) StartupDeficit() float64 {
+	return cubicLatencySamples * c.ratio
+}
+
 // GetFilterLength returns 0 as cubic doesn't use a filter.
 func (c *CubicStage[F]) GetFilterLength() int {
 	return cubicInterpolationPoints

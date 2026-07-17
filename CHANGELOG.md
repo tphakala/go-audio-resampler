@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Half-band stage construction errors now propagate instead of silently
   substituting a nearest-neighbor stub. (#51)
 - `GetLatency` now accounts for decimation and cubic stages. (#51)
+- `GetLatency` on the `New(config)` path now reports the measured startup
+  deficit in output samples; it previously mixed rate domains across pipeline
+  stages and mis-reported multi-stage ratios (672 reported vs 703 measured at
+  44100 to 96000 QualityHigh; now within 2 samples). (#52)
 
 ### Changed
 
