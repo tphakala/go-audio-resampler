@@ -347,10 +347,17 @@ func DeinterleaveFromStereo(interleaved []float64) (left, right []float64) {
 //	    log.Fatal(err)
 //	}
 //	for chunk := range audioChunks {
-//	    output, _ := r.Process(chunk)  // []float32 in, []float32 out
+//	    output, err := r.Process(chunk)  // []float32 in, []float32 out
+//	    if err != nil {
+//	        log.Fatal(err)
+//	    }
 //	    writeOutput(output)
 //	}
-//	final, _ := r.Flush()  // Returns []float32!
+//	final, err := r.Flush()  // Returns []float32!
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	writeOutput(final)
 type SimpleResamplerFloat32 struct {
 	engine *engine.Resampler[float32]
 }
