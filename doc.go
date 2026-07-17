@@ -38,8 +38,9 @@
 //	}
 //
 // For streaming resampling with a reusable resampler (one mono channel; for
-// multi-channel audio call [Resampler.ProcessMulti] per chunk and
-// [Resampler.FlushMulti] once at end-of-stream):
+// multi-channel audio call [Resampler.ProcessMulti] per chunk and, at
+// end-of-stream, [MultiFlusher.FlushMulti] via a type assertion on the
+// resampler, as shown in the [MultiFlusher] example):
 //
 //	config := &resampler.Config{
 //	    InputRate:  44100,
