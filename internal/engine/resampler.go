@@ -239,7 +239,9 @@ func (r *Resampler[F]) ProcessZeroCopy(input []F) ([]F, error) { //nolint:dupl /
 	r.samplesIn += int64(len(input))
 
 	if r.cubicStage != nil {
-		output, err := r.cubicStage.Process(input)
+		// Zero-copy path: the returned slice may alias the cubic stage's
+		// internal output buffer, matching the ProcessZeroCopy contract.
+		output, err := r.cubicStage.processZeroCopy(input)
 		if err != nil {
 			return nil, fmt.Errorf("cubic stage processing failed: %w", err)
 		}
@@ -276,8 +278,17 @@ func (r *Resampler[F]) ProcessZeroCopy(input []F) ([]F, error) { //nolint:dupl /
 // Flush returns any remaining buffered samples.
 func (r *Resampler[F]) Flush() ([]F, error) {
 	// QualityQuick cubic stage holds a cubicLatencySamples-sample tail; drain it.
+	// The samplesOut accounting at the bottom of this method is on the FIR
+	// path only, so this branch must account for its own emitted tail:
+	// otherwise GetStatistics undercounts by the tail length now that cubic
+	// Flush emits a real tail instead of always being empty.
 	if r.cubicStage != nil {
-		return r.cubicStage.Flush()
+		output, err := r.cubicStage.Flush()
+		if err != nil {
+			return nil, err
+		}
+		r.samplesOut += int64(len(output))
+		return output, nil
 	}
 
 	var output []F

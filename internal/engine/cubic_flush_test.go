@@ -190,6 +190,45 @@ func TestCubicStage_FlushIsNonEmptyAfterRealInput(t *testing.T) {
 	}
 }
 
+// GetStatistics()["samplesOut"] must count every sample that Process and
+// Flush return. On the FIR path the engine's Flush adds len(output) to
+// samplesOut; the cubic (QualityQuick) branch early-returns the stage's
+// flush tail and used to skip that accounting, so the statistic undercounted
+// by the flush-tail length once cubic Flush began emitting a real tail. This
+// pins the invariant: samplesOut == len(Process output) + len(Flush output).
+func TestCubicStage_FlushUpdatesSamplesOut(t *testing.T) {
+	r, err := NewResampler[float64](44100, 48000, QualityQuick)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n = 4410
+	in := make([]float64, n)
+	for i := range in {
+		in[i] = float64(i)
+	}
+	out, err := r.Process(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tail, err := r.Flush()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A non-empty tail is what makes the undercount observable; without it
+	// the assertion below could pass even with the accounting bug present.
+	if len(tail) == 0 {
+		t.Fatal("Flush returned no tail; test cannot distinguish the samplesOut undercount")
+	}
+
+	returned := int64(len(out) + len(tail))
+	got := r.GetStatistics()["samplesOut"]
+	if got != returned {
+		t.Errorf("samplesOut statistic = %d, want %d (Process %d + Flush %d): cubic Flush skips samplesOut accounting",
+			got, returned, len(out), len(tail))
+	}
+}
+
 // Cubic chunked-vs-one-shot equivalence at engine level: the root pin test
 // (streaming_equivalence_test.go) covers QualityLow/Medium/High only, not
 // QualityQuick's cubic path. Feeding the same signal in small chunks versus

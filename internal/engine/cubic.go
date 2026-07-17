@@ -13,11 +13,12 @@ import (
 // CubicStage implements cubic (4-point, 3rd order) interpolation matching SOXR.
 // This is the fastest resampling method, used for QualityQuick preset.
 type CubicStage[F simdops.Float] struct {
-	ratio   float64
-	phase   float64
-	history [4]F // 4-point window for interpolation
-	primed  int  // real samples pushed so far, capped at cubicLatencySamples
-	latency int
+	ratio     float64
+	phase     float64
+	history   [4]F // 4-point window for interpolation
+	primed    int  // real samples pushed so far, capped at cubicLatencySamples
+	latency   int
+	outputBuf []F // reused across calls so the warm path allocates nothing
 }
 
 // NewCubicStage creates a new cubic interpolation stage.
@@ -29,15 +30,39 @@ func NewCubicStage[F simdops.Float](ratio float64) *CubicStage[F] {
 	}
 }
 
-// Process resamples input using cubic interpolation.
+// Process resamples input using cubic interpolation. The returned slice is
+// owned by the caller and remains valid across subsequent calls.
 func (c *CubicStage[F]) Process(input []F) ([]F, error) {
+	out, err := c.processZeroCopy(input)
+	if err != nil || len(out) == 0 {
+		return out, err
+	}
+	// Return a copy so the caller's slice is not corrupted when the next call
+	// reuses the internal output buffer.
+	result := make([]F, len(out))
+	copy(result, out)
+	return result, nil
+}
+
+// processZeroCopy is the allocation-free internal path. The returned slice
+// aliases c.outputBuf and is only valid until the next Process,
+// processZeroCopy, Flush, or Reset call.
+func (c *CubicStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:unparam // error kept for symmetry with the FIR stages' Process signature
 	if len(input) == 0 {
 		return []F{}, nil
 	}
 
-	// Estimate output size
-	outputSize := int(math.Ceil(float64(len(input)) * c.ratio))
-	output := make([]F, 0, outputSize)
+	// Upper bound on the outputs this call can emit: the phase accumulator
+	// advances one input unit per sample and emits at most one output per
+	// 1/ratio of that advance, so the count never exceeds ceil(len*ratio)
+	// plus one boundary-carry sample. Pre-size the reused buffer to that
+	// bound via growStableLen (which adds headroom when it must grow) so
+	// steady-state constant-chunk streaming reuses it without allocating.
+	// append then fills it, so an off-by-one in the bound can never write out
+	// of range; on the warm path the capacity already covers the count and
+	// append allocates nothing.
+	maxOut := int(math.Ceil(float64(len(input))*c.ratio)) + 1
+	out := growStableLen(c.outputBuf, maxOut)[:0]
 
 	for _, sample := range input {
 		// Shift history window
@@ -59,8 +84,7 @@ func (c *CubicStage[F]) Process(input []F) ([]F, error) {
 		// Generate output samples
 		for c.phase < 1.0 {
 			// Cubic interpolation matching SOXR
-			y := c.interpolate(c.phase)
-			output = append(output, y)
+			out = append(out, c.interpolate(c.phase))
 
 			// Advance phase
 			c.phase += 1.0 / c.ratio
@@ -70,7 +94,8 @@ func (c *CubicStage[F]) Process(input []F) ([]F, error) {
 		c.phase -= 1.0
 	}
 
-	return output, nil
+	c.outputBuf = out
+	return out, nil
 }
 
 // interpolate performs cubic interpolation matching SOXR's implementation.

@@ -151,6 +151,63 @@ func TestProcessInto_ZeroAllocs(t *testing.T) { //nolint:dupl // intentional par
 	}
 }
 
+// assertProcessIntoWarmZeroAllocs warms the resampler once, then asserts that
+// a Reset+ProcessInto cycle allocates nothing under testing.AllocsPerRun.
+// Resetting inside the measured closure keeps the internal buffers at their
+// grown capacity while re-exercising the priming path each iteration.
+func assertProcessIntoWarmZeroAllocs(t *testing.T, r *SimpleResampler, input, output []float64) {
+	t.Helper()
+
+	r.Reset()
+	if _, err := r.ProcessInto(input, output); err != nil {
+		t.Fatal(err)
+	}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		r.Reset()
+		_, _ = r.ProcessInto(input, output)
+	})
+	if allocs != 0 {
+		t.Fatalf("ProcessInto allocated %.0f times per call; expected 0", allocs)
+	}
+}
+
+// TestProcessInto_ZeroAllocs_QualityQuick enforces the zero-allocation
+// invariant for the QualityQuick (cubic) path. doc.go advertises ProcessInto
+// as zero-allocation once warm; on this branch QualityQuick maps to the cubic
+// stage, so that stage must reuse a persistent output buffer like the FIR
+// stages do instead of allocating a fresh slice per call. TestProcessInto_ZeroAllocs
+// covers only the FIR qualities.
+func TestProcessInto_ZeroAllocs_QualityQuick(t *testing.T) {
+	cases := []struct {
+		name            string
+		inRate, outRate float64
+		durSeconds      int
+	}{
+		{"44100to48_quick", 44100, 48000, 3}, // upsample
+		{"48to16_quick", 48000, 16000, 3},    // integer downsample
+		{"48to44100_quick", 48000, 44100, 3}, // non-integer downsample
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := NewEngine(tc.inRate, tc.outRate, QualityQuick)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			inputLen := int(tc.inRate) * tc.durSeconds
+			input := make([]float64, inputLen)
+			for i := range input {
+				input[i] = float64(i) * 1e-5
+			}
+			output := make([]float64, r.EstimateOutput(inputLen))
+
+			assertProcessIntoWarmZeroAllocs(t, r, input, output)
+		})
+	}
+}
+
 // TestProcessInto_BufferTooSmall verifies that ErrBufferTooSmall is returned
 // when the output buffer is insufficient.
 func TestProcessInto_BufferTooSmall(t *testing.T) {
