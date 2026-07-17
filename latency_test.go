@@ -41,3 +41,30 @@ func TestLatency_MatchesMeasuredDeficit(t *testing.T) {
 		}
 	}
 }
+
+// Float32 mirror of one row of TestLatency_MatchesMeasuredDeficit: the float32
+// engine (NewEngineFloat32) must report the same startup deficit as the
+// float64 path.
+func TestLatencyFloat32_MatchesMeasuredDeficit(t *testing.T) {
+	const in, out = 44100.0, 48000.0
+	for _, q := range []QualityPreset{QualityQuick, QualityLow, QualityMedium, QualityHigh} {
+		r, err := NewEngineFloat32(in, out, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		const n = 44100
+		sig := make([]float32, n)
+		for i := range sig {
+			sig[i] = float32(0.5 * math.Sin(2*math.Pi*997*float64(i)/in))
+		}
+		outSamples, err := r.Process(sig)
+		if err != nil {
+			t.Fatal(err)
+		}
+		measured := int(float64(n)*out/in) - len(outSamples)
+		got := r.Latency()
+		if got < measured-2 || got > measured+2 {
+			t.Errorf("q=%v: Latency()=%d, measured deficit %d", q, got, measured)
+		}
+	}
+}

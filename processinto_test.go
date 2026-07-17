@@ -553,6 +553,61 @@ func TestProcessIntoFloat32_ZeroAllocs(t *testing.T) { //nolint:dupl // intentio
 	}
 }
 
+// assertProcessIntoFloat32WarmZeroAllocs is the float32 mirror of
+// assertProcessIntoWarmZeroAllocs: warm the engine once, then assert a
+// Reset+ProcessInto cycle allocates nothing under testing.AllocsPerRun.
+func assertProcessIntoFloat32WarmZeroAllocs(t *testing.T, r *SimpleResamplerFloat32, input, output []float32) {
+	t.Helper()
+
+	r.Reset()
+	if _, err := r.ProcessInto(input, output); err != nil {
+		t.Fatal(err)
+	}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		r.Reset()
+		_, _ = r.ProcessInto(input, output)
+	})
+	if allocs != 0 {
+		t.Fatalf("ProcessInto allocated %.0f times per call; expected 0", allocs)
+	}
+}
+
+// TestProcessIntoFloat32_ZeroAllocs_QualityQuick enforces the zero-allocation
+// invariant for the QualityQuick (cubic) path on the float32 engine, mirroring
+// TestProcessInto_ZeroAllocs_QualityQuick. QualityQuick maps to the cubic
+// stage, which must reuse a persistent output buffer instead of allocating a
+// fresh slice per call.
+func TestProcessIntoFloat32_ZeroAllocs_QualityQuick(t *testing.T) {
+	cases := []struct {
+		name            string
+		inRate, outRate float64
+		durSeconds      int
+	}{
+		{"44100to48_quick", 44100, 48000, 3}, // upsample
+		{"48to16_quick", 48000, 16000, 3},    // integer downsample
+		{"48to44100_quick", 48000, 44100, 3}, // non-integer downsample
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := NewEngineFloat32(tc.inRate, tc.outRate, QualityQuick)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			inputLen := int(tc.inRate) * tc.durSeconds
+			input := make([]float32, inputLen)
+			for i := range input {
+				input[i] = float32(i) * 1e-5
+			}
+			output := make([]float32, r.EstimateOutput(inputLen))
+
+			assertProcessIntoFloat32WarmZeroAllocs(t, r, input, output)
+		})
+	}
+}
+
 // TestProcessFloat32Into_ZeroAllocs enforces the zero-allocation invariant for
 // the float32 New(...) batch path (constantRateResampler.ProcessFloat32Into).
 // This path converts float32<->float64 through grow-only scratch buffers, so it
