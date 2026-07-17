@@ -37,9 +37,9 @@
 //	    log.Fatal(err)
 //	}
 //
-// For streaming resampling with a reusable resampler (one mono channel;
-// for multi-channel audio use [Resampler.ProcessMulti], see "Stereo
-// Processing" below):
+// For streaming resampling with a reusable resampler (one mono channel; for
+// multi-channel audio call [Resampler.ProcessMulti] per chunk and
+// [Resampler.FlushMulti] once at end-of-stream):
 //
 //	config := &resampler.Config{
 //	    InputRate:  44100,
@@ -97,16 +97,18 @@
 // which run on the float32-native engine and are likewise zero-allocation once
 // warm.
 //
-// # Latency and Real-time Streaming
+// # Latency and Real-Time Streaming
 //
 // A streaming resampler has a startup deficit: the internal filter needs a
 // few samples of history before it can emit correctly filtered output, so
-// the first Process calls in a stream withhold up to [SimpleResampler.Latency]
+// the first Process calls in a stream withhold roughly [SimpleResampler.Latency]
 // (or [SimpleResamplerFloat32.Latency]) samples that later calls make up.
 // Callers that need a fixed number of output samples per callback, such as
 // a portaudio or miniaudio audio callback, should sit a small FIFO between
-// the resampler and the callback, primed with Latency() samples of silence
-// so the first callbacks are already fed:
+// the resampler and the callback, primed with Latency() samples of silence.
+// Latency() matches the measured deficit to within about 2 samples, so
+// priming with it keeps callbacks fed in practice; any 1-2 sample shortfall
+// self-heals as the deficit-driven buffer sizing catches up:
 //
 //	r, err := resampler.NewEngineFloat32(44100, 48000, resampler.QualityHigh)
 //	if err != nil {

@@ -56,6 +56,12 @@ func main() {
 		// full outFrames, not outFrames minus the priming already sitting
 		// in the FIFO; netting the priming against the first request would
 		// count the same deficit twice and under-deliver on that call.
+		//
+		// This holds when outFrames comfortably exceeds Latency(), as here.
+		// With an output buffer smaller than the deficit, a single primed
+		// Process cannot cover it and the shortfall instead spreads over the
+		// first several callbacks until the FIFO fills; the underrun branch
+		// below tolerates that warmup.
 		need := outFrames
 		if !firstCall {
 			need = outFrames - len(fifo)
@@ -66,6 +72,8 @@ func main() {
 		firstCall = false
 		inFrames := int(math.Ceil(float64(need) / ratio))
 
+		// Allocated per callback for clarity; a production callback should
+		// reuse a single scratch buffer instead of allocating each call.
 		in := make([]float32, inFrames)
 		for i := range in {
 			in[i] = float32(0.5 * math.Sin(phase))
@@ -80,6 +88,9 @@ func main() {
 		if len(fifo) >= outFrames {
 			deliver := fifo[:outFrames]
 			_ = deliver // hand exactly outFrames samples to the audio API here
+			// Resliced from the front for clarity; the drained head keeps the
+			// backing array growing over a long stream, so production code
+			// would use a ring buffer instead.
 			fifo = fifo[outFrames:]
 		} else {
 			// Underrun (should not happen after priming): deliver silence.

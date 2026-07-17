@@ -176,7 +176,7 @@ func (r *SimpleResampler) EstimateOutput(inputLen int) int {
 
 // Flush drains the remaining buffered samples at end-of-stream. It is
 // end-of-stream only: pushing padding through the filter on every chunk
-// instead of just the last one creates audible edge transients (issue #51).
+// instead of just the last one creates audible edge transients.
 // Flush is terminal. After it returns, the instance behaves like a fresh
 // one for output purposes: a second Flush call returns an empty slice, and
 // a subsequent Process call produces output bit-identical to a fresh

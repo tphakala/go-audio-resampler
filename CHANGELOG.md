@@ -18,23 +18,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Polyphase phase-boundary coefficient interpolation used a wrapped neighbor,
-  degrading THD+N by 77 to 111 dB at ratios with active sub-phase
-  interpolation (for example 44100 to 64000 or 32000 to 44100); exact-rational
-  ratios such as 44100 to 48000 were unaffected.
+  degrading THD+N at ratios with active sub-phase interpolation. The committed
+  measurement shows an 86.26 dB improvement (wrapped -54.46 dB versus flat
+  -140.72 dB) at 44100 to 64000, with similar magnitude at other
+  active-interpolation ratios measured during the investigation but not
+  committed as tests; exact-rational ratios such as 44100 to 48000 were
+  unaffected. (#51)
 - Severe non-integer downsampling (beyond roughly 1:16) corrupted output with
-  repeated stale samples and grew internal history without bound.
+  repeated stale samples and grew internal history without bound. (#51)
 - `Flush` over-padded each filter stage by one zero, emitting about 2 phantom
   samples; `Process` plus `Flush` now totals within
   `[floor(n*ratio), ceil(n*ratio)+1]`. (#51)
 - At unity ratio (`inputRate == outputRate`), `Process` returned the caller's
-  own input slice; it now returns an owned buffer.
+  own input slice; it now returns an owned buffer. (#51)
 - Cubic (`QualityQuick`) resampling computed its first output segments from a
   fictional zero history and never emitted the final segments; output is now
-  aligned to real data, with the first output after 2 input samples.
-- NaN sample rates are now rejected by constructors.
+  aligned to real data, with the first output after 2 input samples. Its
+  `Process` also returned an aliased empty slice during priming; it now returns
+  an owned buffer. (#51)
+- NaN sample rates are now rejected by all constructors, covering both the
+  `NewEngine`/`NewEngineFloat32` engine path and the `New(config)` pipeline
+  path (`New`, `NewMultiChannel`, `NewStereo`, `NewSimple`, and the preset
+  helpers). (#51)
 - Half-band stage construction errors now propagate instead of silently
-  substituting a nearest-neighbor stub.
-- `GetLatency` now accounts for decimation and cubic stages.
+  substituting a nearest-neighbor stub. (#51)
+- `GetLatency` now accounts for decimation and cubic stages. (#51)
 
 ### Changed
 
@@ -43,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against leftover padding. (#51)
 - `QualityQuick` through `NewEngine` and `NewEngineFloat32` now uses cubic
   interpolation (matching `New()` and the documented contract) instead of a
-  full FIR pipeline; latency drops accordingly.
+  full FIR pipeline; latency drops accordingly. (#51)
 
 ## [1.4.0] - 2026-05-29
 

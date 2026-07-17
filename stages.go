@@ -123,7 +123,9 @@ func newFFTStage(ratio float64, fftSize, precision int) (pipeline.Stage, error) 
 	return newPolyphaseStage(ratio, fftSize, defaultFFTPhases, precision)
 }
 
-// stubStage is a temporary stub implementation for stages not yet implemented.
+// stubStage is a minimal passthrough Stage used only by tests; no production
+// code path constructs it. It nearest-neighbor resamples by the ratio, which
+// is enough to exercise the pipeline.Stage interface without a real filter.
 type stubStage struct {
 	ratio        float64
 	filterLength int
