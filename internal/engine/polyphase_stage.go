@@ -101,14 +101,26 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 	phaseFracScale := float64(int64(1) << phaseFracBits)
 	step := int64(math.Round((1.0 / ratio) * float64(numPhases) * phaseFracScale))
 
-	// Helper function to get prototype coefficient with wrap-around for interpolation
+	// getCoeff samples the prototype for cubic sub-phase interpolation of the
+	// polyphase banks. filterBank.coeffs is the flat prototype
+	// (coeffs[tap*numPhases + phase] == prototype[tap*numPhases + phase]), so the
+	// coefficient adjacent to a phase boundary is the neighbour in this FLAT
+	// array: the right neighbour of (tap t, phase L-1) is coeffs[t*L + L], i.e.
+	// phase 0 of tap t+1, and the left neighbour of (tap t, phase 0) is
+	// coeffs[t*L - 1], i.e. phase L-1 of tap t-1. Boundary policy: positions
+	// before the first or after the last prototype sample have no data, so they
+	// clamp to 0.0 (the natural tails of a finite impulse response).
+	//
+	// This must NOT wrap phase within the same tap (phase % numPhases). Wrapping
+	// picks a prototype sample numPhases-1 positions away at each boundary, which
+	// injects a large discontinuity into the interpolated coefficient. That error
+	// is invisible for exact-rational ratios (e.g. 44100<->48000 == 80/147, where
+	// the fixed-point sub-phase x is identically 0 so the B/C/D banks are never
+	// consulted), but for ratios with active sub-phase interpolation it collapses
+	// THD+N by 77 to 111 dB (measured -32 to -58 dB wrapped versus -136 to -147 dB
+	// flat). See phase_wrap_measure_test.go for the measurement.
 	getCoeff := func(phase, tap int) float64 {
-		// Wrap phase around for interpolation at boundaries
-		wrappedPhase := phase % numPhases
-		if wrappedPhase < 0 {
-			wrappedPhase += numPhases
-		}
-		idx := tap*numPhases + wrappedPhase
+		idx := tap*numPhases + phase
 		if idx < 0 || idx >= len(filterBank.coeffs) {
 			return 0.0
 		}
