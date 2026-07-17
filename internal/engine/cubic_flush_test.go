@@ -128,6 +128,21 @@ func TestCubicStage_FlushAfterPartialPriming(t *testing.T) {
 		t.Errorf("partially primed Process+Flush total %d, want %d +-1", total, ideal)
 	}
 
+	// ideal is 1 here, so the +-1 count check above alone tolerates
+	// total=0: a regression that silently drops the single pushed sample
+	// would still pass it. Pin the drain directly: the tail must be
+	// non-empty, and cubic interpolation evaluates exactly to the center
+	// history point at x=0 (all polynomial terms multiply by x and vanish),
+	// so tail[0] must equal the pushed sample.
+	if len(tail) == 0 {
+		t.Fatal("Flush returned no samples for a single partially-primed input; the pushed sample was dropped")
+	}
+	const pushedSample = 42.0
+	const tolerance = 1e-9
+	if math.Abs(tail[0]-pushedSample) > tolerance {
+		t.Errorf("tail[0] = %v, want within %v of pushed sample %v", tail[0], tolerance, pushedSample)
+	}
+
 	second, err := c.Flush()
 	if err != nil {
 		t.Fatal(err)

@@ -103,6 +103,7 @@ func TestResampler_Reset(t *testing.T) {
 		{"44100_to_48000", 44100, 48000},
 		{"44100_to_96000", 44100, 96000},
 		{"44100_to_88200", 44100, 88200},
+		{"48000_to_16000", 48000, 16000}, // integer decimation ratio, exercises decimationStage.Reset()
 	}
 
 	for _, tc := range testCases {
@@ -212,7 +213,10 @@ func TestInterpolationStages_Reset(t *testing.T) {
 // Multiple Reset Tests - Verify Reset() can be called multiple times
 // =============================================================================
 
-// TestDFTStage_MultipleResets verifies Reset() can be called repeatedly.
+// TestDFTStage_MultipleResets verifies Reset() can be called repeatedly, and
+// that identical input reproduces round 0's output bit-exactly after every
+// Reset() (a partially-cleared delay line would drift round to round even
+// though each individual output stays NaN/Inf-free).
 func TestDFTStage_MultipleResets(t *testing.T) {
 	stage, err := NewDFTStage[float64](2, QualityHigh)
 	require.NoError(t, err)
@@ -222,6 +226,7 @@ func TestDFTStage_MultipleResets(t *testing.T) {
 		input[i] = 1.0
 	}
 
+	var round0Output []float64
 	for round := range 5 {
 		// Process
 		output, err := stage.Process(input)
@@ -232,14 +237,27 @@ func TestDFTStage_MultipleResets(t *testing.T) {
 			assert.False(t, math.IsNaN(v), "Round %d: output[%d] is NaN", round, i)
 		}
 
+		if round == 0 {
+			round0Output = make([]float64, len(output))
+			copy(round0Output, output)
+		} else {
+			require.Len(t, output, len(round0Output), "Round %d: output length differs from round 0", round)
+			for i := range output {
+				assert.Equal(t, round0Output[i], output[i],
+					"Round %d: output[%d] differs from round 0 after Reset()", round, i)
+			}
+		}
+
 		// Reset
 		stage.Reset()
 	}
 
-	t.Log("DFT stage: 5 Reset() cycles completed successfully")
+	t.Log("DFT stage: 5 Reset() cycles reproduce round 0 output bit-exactly")
 }
 
-// TestResampler_MultipleResets verifies Resampler Reset() can be called repeatedly.
+// TestResampler_MultipleResets verifies Resampler Reset() can be called
+// repeatedly, and that identical input reproduces round 0's output
+// bit-exactly after every Reset().
 func TestResampler_MultipleResets(t *testing.T) {
 	resampler, err := NewResampler[float64](44100, 48000, QualityHigh)
 	require.NoError(t, err)
@@ -249,6 +267,7 @@ func TestResampler_MultipleResets(t *testing.T) {
 		input[i] = math.Sin(2.0 * math.Pi * float64(i) / 100)
 	}
 
+	var round0Output []float64
 	for round := range 5 {
 		// Process
 		output, err := resampler.Process(input)
@@ -259,11 +278,105 @@ func TestResampler_MultipleResets(t *testing.T) {
 			assert.False(t, math.IsNaN(v), "Round %d: output[%d] is NaN", round, i)
 		}
 
+		if round == 0 {
+			round0Output = make([]float64, len(output))
+			copy(round0Output, output)
+		} else {
+			require.Len(t, output, len(round0Output), "Round %d: output length differs from round 0", round)
+			for i := range output {
+				assert.Equal(t, round0Output[i], output[i],
+					"Round %d: output[%d] differs from round 0 after Reset()", round, i)
+			}
+		}
+
 		// Reset
 		resampler.Reset()
 	}
 
-	t.Log("Resampler: 5 Reset() cycles completed successfully")
+	t.Log("Resampler: 5 Reset() cycles reproduce round 0 output bit-exactly")
+}
+
+// TestResampler_ResetAfterFlush verifies that Reset() following a terminal
+// Flush() leaves the resampler equivalent to a fresh instance: processing
+// the same input again after Reset must match a fresh resampler's Process()
+// and Flush() bit-exactly. This guards the case a plain mid-stream Reset
+// test cannot: Flush() itself mutates state (draining delay lines, marking
+// the stream terminal), so Reset() has more to undo here than after a bare
+// Process().
+func TestResampler_ResetAfterFlush(t *testing.T) {
+	resampler, err := NewResampler[float64](44100, 48000, QualityHigh)
+	require.NoError(t, err)
+
+	input := make([]float64, 2000)
+	for i := range input {
+		input[i] = math.Sin(2.0 * math.Pi * 1000 * float64(i) / 44100)
+	}
+
+	_, err = resampler.Process(input)
+	require.NoError(t, err)
+	_, err = resampler.Flush()
+	require.NoError(t, err)
+
+	resampler.Reset()
+
+	output, err := resampler.Process(input)
+	require.NoError(t, err)
+	flush, err := resampler.Flush()
+	require.NoError(t, err)
+
+	freshResampler, err := NewResampler[float64](44100, 48000, QualityHigh)
+	require.NoError(t, err)
+	freshOutput, err := freshResampler.Process(input)
+	require.NoError(t, err)
+	freshFlush, err := freshResampler.Flush()
+	require.NoError(t, err)
+
+	require.Len(t, output, len(freshOutput), "Process length after Reset-following-Flush differs from fresh")
+	for i := range output {
+		assert.Equal(t, freshOutput[i], output[i],
+			"Process[%d] after Reset-following-Flush differs from fresh", i)
+	}
+	require.Len(t, flush, len(freshFlush), "Flush length after Reset-following-Flush differs from fresh")
+	for i := range flush {
+		assert.Equal(t, freshFlush[i], flush[i],
+			"Flush[%d] after Reset-following-Flush differs from fresh", i)
+	}
+
+	t.Log("Resampler: Reset() after terminal Flush() reproduces fresh-instance output bit-exactly")
+}
+
+// TestResampler_Reset_Float32 mirrors TestResampler_Reset for the float32
+// instantiation: Reset() must clear state correctly on the SIMD float32
+// code path too, not just float64.
+func TestResampler_Reset_Float32(t *testing.T) {
+	resampler, err := NewResampler[float32](44100, 48000, QualityHigh)
+	require.NoError(t, err)
+
+	input := make([]float32, 4000)
+	for i := range input {
+		input[i] = float32(math.Sin(2.0 * math.Pi * 1000 * float64(i) / 44100))
+	}
+	output1, err := resampler.Process(input)
+	require.NoError(t, err)
+	require.NotEmpty(t, output1)
+
+	resampler.Reset()
+
+	output2, err := resampler.Process(input)
+	require.NoError(t, err)
+
+	freshResampler, err := NewResampler[float32](44100, 48000, QualityHigh)
+	require.NoError(t, err)
+	outputFresh, err := freshResampler.Process(input)
+	require.NoError(t, err)
+
+	require.Len(t, output2, len(outputFresh), "Output length after reset should match fresh resampler")
+	for i := range output2 {
+		assert.Equal(t, outputFresh[i], output2[i],
+			"Output[%d] after reset differs from fresh resampler", i)
+	}
+
+	t.Log("Resampler[float32]: Reset() reproduces fresh-instance output bit-exactly")
 }
 
 // =============================================================================

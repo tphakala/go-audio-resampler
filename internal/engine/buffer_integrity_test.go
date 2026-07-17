@@ -283,82 +283,122 @@ func TestResampler_ProcessAndFlushSequence(t *testing.T) {
 }
 
 // TestDFTStage_MultipleProcessCalls tests that multiple consecutive Process()
-// calls work correctly and don't accumulate errors.
+// calls work correctly, don't corrupt earlier returned outputs, and are
+// deterministic: an identical call sequence on a second fresh instance must
+// reproduce the same outputs bit-exactly.
 func TestDFTStage_MultipleProcessCalls(t *testing.T) {
-	stage, err := NewDFTStage[float64](2, QualityHigh)
-	require.NoError(t, err, "Failed to create DFT stage")
-
 	const numCalls = 10
 	const samplesPerCall = 500
 
-	// Store all outputs
-	outputs := make([][]float64, numCalls)
-
-	for i := range numCalls {
+	// makeInput builds the same deterministic per-call input for both
+	// instances below, so the two runs are directly comparable.
+	makeInput := func(callIdx int) []float64 {
 		input := make([]float64, samplesPerCall)
 		for j := range input {
 			// Different phase for each call to detect any cross-contamination
-			input[j] = math.Sin(2.0*math.Pi*float64(j)/100 + float64(i)*math.Pi/5)
+			input[j] = math.Sin(2.0*math.Pi*float64(j)/100 + float64(callIdx)*math.Pi/5)
 		}
-
-		output, err := stage.Process(input)
-		require.NoError(t, err, "Process() call %d failed", i)
-
-		// Save a copy
-		outputs[i] = make([]float64, len(output))
-		copy(outputs[i], output)
+		return input
 	}
 
-	// Verify all stored outputs are still valid (not corrupted by subsequent calls)
-	for i := range numCalls - 1 {
-		for j := range min(10, len(outputs[i])) {
-			// The saved value should match what we stored
-			assert.False(t, math.IsNaN(outputs[i][j]),
-				"outputs[%d][%d] became NaN", i, j)
-			assert.False(t, math.IsInf(outputs[i][j], 0),
-				"outputs[%d][%d] became Inf", i, j)
+	runSequence := func(stage *DFTStage[float64]) (raw, saved [][]float64) {
+		raw = make([][]float64, numCalls)
+		saved = make([][]float64, numCalls)
+		for i := range numCalls {
+			output, err := stage.Process(makeInput(i))
+			require.NoError(t, err, "Process() call %d failed", i)
+			raw[i] = output
+			saved[i] = make([]float64, len(output))
+			copy(saved[i], output)
+		}
+		return raw, saved
+	}
+
+	stageA, err := NewDFTStage[float64](2, QualityHigh)
+	require.NoError(t, err, "Failed to create DFT stage")
+	rawA, savedA := runSequence(stageA)
+
+	// Every earlier call's returned slice must still hold the values it held
+	// right after that call: a later Process() reusing the same backing
+	// array without properly copying out would silently corrupt it.
+	for i := range numCalls {
+		require.Len(t, rawA[i], len(savedA[i]), "call %d output length changed", i)
+		for j := range rawA[i] {
+			assert.Equal(t, savedA[i][j], rawA[i][j],
+				"call %d output[%d] was corrupted by a later Process() call", i, j)
 		}
 	}
 
-	t.Logf("DFT stage: %d consecutive Process() calls verified", numCalls)
+	// Determinism: an identical call sequence on a second, fresh instance
+	// must produce bit-identical output per call.
+	stageB, err := NewDFTStage[float64](2, QualityHigh)
+	require.NoError(t, err, "Failed to create second DFT stage")
+	_, savedB := runSequence(stageB)
+
+	for i := range numCalls {
+		require.Len(t, savedB[i], len(savedA[i]), "call %d length differs between two fresh instances", i)
+		for j := range savedA[i] {
+			assert.Equal(t, savedA[i][j], savedB[i][j],
+				"call %d output[%d] differs between two fresh instances given identical input", i, j)
+		}
+	}
+
+	t.Logf("DFT stage: %d consecutive Process() calls verified bit-identical and uncorrupted", numCalls)
 }
 
-// TestPolyphaseStage_MultipleProcessCalls tests that multiple consecutive Process()
-// calls work correctly.
+// TestPolyphaseStage_MultipleProcessCalls tests that multiple consecutive
+// Process() calls work correctly, don't corrupt earlier returned outputs,
+// and are deterministic across a second fresh instance.
 func TestPolyphaseStage_MultipleProcessCalls(t *testing.T) {
-	stage, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
-	require.NoError(t, err, "Failed to create polyphase stage")
-
 	const numCalls = 10
 	const samplesPerCall = 1000
 
-	// Store all outputs
-	outputs := make([][]float64, numCalls)
-
-	for i := range numCalls {
+	makeInput := func(callIdx int) []float64 {
 		input := make([]float64, samplesPerCall)
 		for j := range input {
-			input[j] = math.Sin(2.0*math.Pi*float64(j)/100 + float64(i)*math.Pi/5)
+			input[j] = math.Sin(2.0*math.Pi*float64(j)/100 + float64(callIdx)*math.Pi/5)
 		}
-
-		output, err := stage.Process(input)
-		require.NoError(t, err, "Process() call %d failed", i)
-
-		outputs[i] = make([]float64, len(output))
-		copy(outputs[i], output)
+		return input
 	}
 
-	// Verify all stored outputs are still valid
-	for i := range numCalls - 1 {
-		for j := range min(10, len(outputs[i])) {
-			assert.False(t, math.IsNaN(outputs[i][j]),
-				"outputs[%d][%d] became NaN", i, j)
-			assert.False(t, math.IsInf(outputs[i][j], 0),
-				"outputs[%d][%d] became Inf", i, j)
+	runSequence := func(stage *PolyphaseStage[float64]) (raw, saved [][]float64) {
+		raw = make([][]float64, numCalls)
+		saved = make([][]float64, numCalls)
+		for i := range numCalls {
+			output, err := stage.Process(makeInput(i))
+			require.NoError(t, err, "Process() call %d failed", i)
+			raw[i] = output
+			saved[i] = make([]float64, len(output))
+			copy(saved[i], output)
+		}
+		return raw, saved
+	}
+
+	stageA, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
+	require.NoError(t, err, "Failed to create polyphase stage")
+	rawA, savedA := runSequence(stageA)
+
+	for i := range numCalls {
+		require.Len(t, rawA[i], len(savedA[i]), "call %d output length changed", i)
+		for j := range rawA[i] {
+			assert.Equal(t, savedA[i][j], rawA[i][j],
+				"call %d output[%d] was corrupted by a later Process() call", i, j)
 		}
 	}
 
-	t.Logf("Polyphase stage: %d consecutive Process() calls verified", numCalls)
+	stageB, err := NewPolyphaseStage[float64](1.088435374, 0.459375, true, QualityHigh)
+	require.NoError(t, err, "Failed to create second polyphase stage")
+	_, savedB := runSequence(stageB)
+
+	for i := range numCalls {
+		require.Len(t, savedB[i], len(savedA[i]), "call %d length differs between two fresh instances", i)
+		for j := range savedA[i] {
+			assert.Equal(t, savedA[i][j], savedB[i][j],
+				"call %d output[%d] differs between two fresh instances given identical input", i, j)
+		}
+	}
+
+	t.Logf("Polyphase stage: %d consecutive Process() calls verified bit-identical and uncorrupted", numCalls)
 }
 
 // TestCubicStage_BufferIntegrity verifies CubicStage doesn't have buffer issues.
