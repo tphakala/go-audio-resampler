@@ -57,6 +57,50 @@ type PolyphaseStage[F simdops.Float] struct {
 	samplesOut int64
 }
 
+// buildCubicInterpBanks builds the four Catmull-Rom sub-phase interpolation
+// coefficient banks from a prototype coefficient accessor. getCoeff(phase, tap)
+// returns the prototype coefficient for that phase and tap and applies the
+// caller's boundary-indexing policy for out-of-range phases. Taps are stored
+// reversed for the dot-product kernels. Shared by NewPolyphaseStage and the
+// phase-wrap measurement test so the interpolation formula lives in one place.
+func buildCubicInterpBanks[F simdops.Float](numPhases, tapsPerPhase int, getCoeff func(phase, tap int) float64) (a, b, c, d [][]F) {
+	a = make([][]F, numPhases)
+	b = make([][]F, numPhases)
+	c = make([][]F, numPhases)
+	d = make([][]F, numPhases)
+
+	for phase := range numPhases {
+		a[phase] = make([]F, tapsPerPhase)
+		b[phase] = make([]F, tapsPerPhase)
+		c[phase] = make([]F, tapsPerPhase)
+		d[phase] = make([]F, tapsPerPhase)
+
+		for tap := range tapsPerPhase {
+			// Get coefficients from adjacent phases for cubic interpolation
+			// f0 = current phase, f1 = next phase, fm1 = previous phase, f2 = next-next phase
+			f0 := getCoeff(phase, tap)
+			f1 := getCoeff(phase+1, tap)
+			fm1 := getCoeff(phase-1, tap)
+			f2 := getCoeff(phase+cubicPhaseOffset, tap)
+
+			// Compute cubic interpolation coefficients (Catmull-Rom style)
+			// These allow smooth interpolation: f(x) = a + b*x + c*x² + d*x³
+			av := f0
+			cv := cubicCenterCoeff*(f1+fm1) - f0
+			dv := (1.0 / cubicDivisor) * (f2 - f1 + fm1 - f0 - cubicCMultiplier*cv)
+			bv := f1 - f0 - dv - cv
+
+			// Store in REVERSED order for correct convolution direction
+			revTap := tapsPerPhase - 1 - tap
+			a[phase][revTap] = F(av)
+			b[phase][revTap] = F(bv)
+			c[phase][revTap] = F(cv)
+			d[phase][revTap] = F(dv)
+		}
+	}
+	return a, b, c, d
+}
+
 // NewPolyphaseStage creates a polyphase resampling stage.
 //
 // Parameters:
@@ -132,40 +176,7 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 	// Allocate coefficient arrays with cubic interpolation support
 	// polyCoeffs = a (base), polyCoeffsB = b (linear), polyCoeffsC = c (quadratic), polyCoeffsD = d (cubic)
 	// Interpolation formula: coef(x) = a + x*(b + x*(c + x*d)) where x ∈ [0, 1)
-	polyCoeffs := make([][]F, numPhases)
-	polyCoeffsB := make([][]F, numPhases)
-	polyCoeffsC := make([][]F, numPhases)
-	polyCoeffsD := make([][]F, numPhases)
-
-	for phase := range numPhases {
-		polyCoeffs[phase] = make([]F, tapsPerPhase)
-		polyCoeffsB[phase] = make([]F, tapsPerPhase)
-		polyCoeffsC[phase] = make([]F, tapsPerPhase)
-		polyCoeffsD[phase] = make([]F, tapsPerPhase)
-
-		for tap := range tapsPerPhase {
-			// Get coefficients from adjacent phases for cubic interpolation
-			// f0 = current phase, f1 = next phase, fm1 = previous phase, f2 = next-next phase
-			f0 := getCoeff(phase, tap)
-			f1 := getCoeff(phase+1, tap)
-			fm1 := getCoeff(phase-1, tap)
-			f2 := getCoeff(phase+cubicPhaseOffset, tap)
-
-			// Compute cubic interpolation coefficients (Catmull-Rom style)
-			// These allow smooth interpolation: f(x) = a + b*x + c*x² + d*x³
-			a := f0
-			c := cubicCenterCoeff*(f1+fm1) - f0
-			d := (1.0 / cubicDivisor) * (f2 - f1 + fm1 - f0 - cubicCMultiplier*c)
-			b := f1 - f0 - d - c
-
-			// Store in REVERSED order for correct convolution direction
-			revTap := tapsPerPhase - 1 - tap
-			polyCoeffs[phase][revTap] = F(a)
-			polyCoeffsB[phase][revTap] = F(b)
-			polyCoeffsC[phase][revTap] = F(c)
-			polyCoeffsD[phase][revTap] = F(d)
-		}
-	}
+	polyCoeffs, polyCoeffsB, polyCoeffsC, polyCoeffsD := buildCubicInterpBanks[F](numPhases, tapsPerPhase, getCoeff)
 
 	return &PolyphaseStage[F]{
 		polyCoeffs:    polyCoeffs,
