@@ -101,6 +101,12 @@ func (s *StageAdapter[F]) GetMemoryUsage() int64 {
 		usage += int64(cap(s.polyphaseStage.history)) * bytesPerElement
 	}
 
+	// Decimation stage memory
+	if s.decimationStage != nil {
+		usage += int64(len(s.decimationStage.coeffs)) * bytesPerElement
+		usage += int64(cap(s.decimationStage.history)) * bytesPerElement
+	}
+
 	return usage
 }
 

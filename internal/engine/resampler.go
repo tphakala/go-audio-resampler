@@ -275,7 +275,7 @@ func (r *Resampler[F]) ProcessZeroCopy(input []F) ([]F, error) { //nolint:dupl /
 
 // Flush returns any remaining buffered samples.
 func (r *Resampler[F]) Flush() ([]F, error) {
-	// QualityQuick cubic stage doesn't buffer
+	// QualityQuick cubic stage holds a cubicLatencySamples-sample tail; drain it.
 	if r.cubicStage != nil {
 		return r.cubicStage.Flush()
 	}
