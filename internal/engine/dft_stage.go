@@ -214,7 +214,11 @@ func (s *DFTStage[F]) Process(input []F) ([]F, error) {
 		return output, err
 	}
 	if s.factor == 1 {
-		return output, nil
+		// factor==1 is a passthrough, but Process guarantees an owned buffer
+		// (convenience resampleAll relies on it); only processZeroCopy may alias.
+		out := make([]F, len(output))
+		copy(out, output)
+		return out, nil
 	}
 	// Return a copy to prevent caller's slice from being corrupted
 	// if they call Process() or Flush() again (which reuses s.outputBuf)
