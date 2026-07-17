@@ -76,15 +76,18 @@ func TestSimpleResamplerFloat32_Process(t *testing.T) {
 	}
 }
 
-// TestSimpleResamplerFloat32_Flush verifies that Flush returns float32.
+// TestSimpleResamplerFloat32_Flush verifies that Flush returns the buffered
+// tail as finite float32 samples after a warm Process() call.
 func TestSimpleResamplerFloat32_Flush(t *testing.T) {
 	r, err := NewEngineFloat32(44100, 48000, QualityHigh)
 	if err != nil {
 		t.Fatalf("NewEngineFloat32 failed: %v", err)
 	}
 
-	// Process some samples first
-	input := make([]float32, 1000)
+	// 4410 samples (0.1s) is well beyond QualityHigh's filter latency, so
+	// the delay line is guaranteed to hold a real buffered tail; Flush must
+	// drain it rather than return empty.
+	input := make([]float32, 4410)
 	for i := range input {
 		input[i] = float32(math.Sin(2 * math.Pi * 1000 * float64(i) / 44100))
 	}
@@ -99,9 +102,13 @@ func TestSimpleResamplerFloat32_Flush(t *testing.T) {
 		t.Fatalf("Flush failed: %v", err)
 	}
 
-	// Flushed samples should exist (filter has latency)
 	if len(flushed) == 0 {
-		t.Log("Flush returned empty (may be valid depending on filter design)")
+		t.Fatal("Flush returned no samples after a warm Process() call; expected the buffered tail to drain")
+	}
+	for i, v := range flushed {
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+			t.Fatalf("flushed[%d] = %v, want finite", i, v)
+		}
 	}
 }
 

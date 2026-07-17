@@ -49,8 +49,8 @@ type Resampler[F simdops.Float] struct {
 //   - For integer ratios: Uses only DFT stage
 //   - For non-integer ratios: Uses DFT pre-stage (2×) + polyphase stage
 func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Quality) (*Resampler[F], error) {
-	if inputRate <= 0 || outputRate <= 0 {
-		return nil, fmt.Errorf("sample rates must be positive: input=%f, output=%f", inputRate, outputRate)
+	if !(inputRate > 0) || !(outputRate > 0) {
+		return nil, fmt.Errorf("sample rates must be positive finite numbers: input=%f, output=%f", inputRate, outputRate)
 	}
 
 	ratio := outputRate / inputRate
@@ -59,9 +59,11 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 	// Following SOXR's pattern: ratios between 1/256 and 256 are practical for audio.
 	// Extreme ratios can cause: (1) integer overflow in output size calculation,
 	// (2) memory exhaustion from attempting to allocate huge output buffers.
+	// The checks are expressed positively so a NaN ratio (e.g. from Inf/Inf)
+	// fails validation instead of silently passing every comparison.
 	const minRatio = 1.0 / 256.0 // 256x downsampling
 	const maxRatio = 256.0       // 256x upsampling
-	if ratio < minRatio || ratio > maxRatio {
+	if !(ratio >= minRatio && ratio <= maxRatio) {
 		return nil, fmt.Errorf("resampling ratio %.6f out of valid range [%.6f, %.0f]", ratio, minRatio, maxRatio)
 	}
 	ops := simdops.For[F]()
@@ -237,7 +239,9 @@ func (r *Resampler[F]) ProcessZeroCopy(input []F) ([]F, error) { //nolint:dupl /
 	r.samplesIn += int64(len(input))
 
 	if r.cubicStage != nil {
-		output, err := r.cubicStage.Process(input)
+		// Zero-copy path: the returned slice may alias the cubic stage's
+		// internal output buffer, matching the ProcessZeroCopy contract.
+		output, err := r.cubicStage.processZeroCopy(input)
 		if err != nil {
 			return nil, fmt.Errorf("cubic stage processing failed: %w", err)
 		}
@@ -273,9 +277,18 @@ func (r *Resampler[F]) ProcessZeroCopy(input []F) ([]F, error) { //nolint:dupl /
 
 // Flush returns any remaining buffered samples.
 func (r *Resampler[F]) Flush() ([]F, error) {
-	// QualityQuick cubic stage doesn't buffer
+	// QualityQuick cubic stage holds a cubicLatencySamples-sample tail; drain it.
+	// The samplesOut accounting at the bottom of this method is on the FIR
+	// path only, so this branch must account for its own emitted tail:
+	// otherwise GetStatistics undercounts by the tail length now that cubic
+	// Flush emits a real tail instead of always being empty.
 	if r.cubicStage != nil {
-		return r.cubicStage.Flush()
+		output, err := r.cubicStage.Flush()
+		if err != nil {
+			return nil, err
+		}
+		r.samplesOut += int64(len(output))
+		return output, nil
 	}
 
 	var output []F
@@ -350,6 +363,31 @@ func (r *Resampler[F]) GetStatistics() map[string]int64 {
 		"samplesIn":  r.samplesIn,
 		"samplesOut": r.samplesOut,
 	}
+}
+
+// Latency returns the startup deficit in output samples: how many samples
+// the first Process calls withhold while the filter delay lines prime.
+// Real-time consumers should prime their output FIFO with this many samples
+// of silence to keep fixed-size callbacks fed.
+func (r *Resampler[F]) Latency() int {
+	if r.cubicStage != nil {
+		return int(math.Ceil(cubicLatencySamples * r.ratio))
+	}
+	deficitIn := 0.0
+	if r.preStage != nil && r.preStage.factor > 1 {
+		deficitIn += float64(r.preStage.tapsPerPhase - 1)
+	}
+	if r.decimationStage != nil {
+		deficitIn += float64(r.decimationStage.numTaps - 1)
+	}
+	if r.polyphaseStage != nil {
+		intermediateFactor := 1.0
+		if r.preStage != nil && r.preStage.factor > 1 {
+			intermediateFactor = float64(r.preStage.factor)
+		}
+		deficitIn += float64(r.polyphaseStage.tapsPerPhase-1) / intermediateFactor
+	}
+	return int(math.Ceil(deficitIn * r.ratio))
 }
 
 // isIntegerRatio checks if the ratio is an integer (within tolerance).

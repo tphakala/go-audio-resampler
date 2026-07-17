@@ -81,7 +81,7 @@ func createStage(spec StageSpec, config *Config) (Stage, error) {
 		return newCubicStage(spec.Ratio), nil
 
 	case pipeline.StageHalfBand:
-		return newHalfBandStage(spec.Ratio, spec.FilterLength, precision), nil
+		return newHalfBandStage(spec.Ratio, spec.FilterLength, precision)
 
 	case pipeline.StagePolyphase:
 		return newPolyphaseStage(

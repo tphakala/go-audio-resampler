@@ -40,6 +40,11 @@ func (s *StageAdapter[F]) GetRatio() float64 {
 
 // GetLatency returns the stage latency in samples.
 // This is the delay due to FIR filter buffering.
+//
+// This is a filter group-delay heuristic in the input domain, consumed by
+// GetInfo for reporting. Streaming users priming a FIFO with silence should
+// instead use the engine Resampler.Latency() accessor, which reports the
+// startup deficit in output samples.
 func (s *StageAdapter[F]) GetLatency() int {
 	latency := 0
 
@@ -51,6 +56,16 @@ func (s *StageAdapter[F]) GetLatency() int {
 	// Polyphase stage latency
 	if s.polyphaseStage != nil {
 		latency += s.polyphaseStage.tapsPerPhase / latencyDivisor
+	}
+
+	// DFT decimation stage latency
+	if s.decimationStage != nil {
+		latency += s.decimationStage.numTaps / latencyDivisor
+	}
+
+	// Cubic interpolation stage latency
+	if s.cubicStage != nil {
+		latency += cubicLatencySamples
 	}
 
 	return latency
@@ -84,11 +99,31 @@ func (s *StageAdapter[F]) GetMemoryUsage() int64 {
 
 	// Polyphase stage memory
 	if s.polyphaseStage != nil {
-		// Phase-first layout: polyCoeffs[phase][tap]
-		for _, phase := range s.polyphaseStage.polyCoeffs {
-			usage += int64(len(phase)) * bytesPerElement
+		// Phase-first layout: polyCoeffs[phase][tap]. All four cubic-interpolation
+		// coefficient banks (a, b, c, d) are the same shape and must all be
+		// counted; summing only polyCoeffs undercounts the coefficients by 4x.
+		for _, bank := range [][][]F{
+			s.polyphaseStage.polyCoeffs,
+			s.polyphaseStage.polyCoeffsB,
+			s.polyphaseStage.polyCoeffsC,
+			s.polyphaseStage.polyCoeffsD,
+		} {
+			for _, phase := range bank {
+				usage += int64(len(phase)) * bytesPerElement
+			}
 		}
 		usage += int64(cap(s.polyphaseStage.history)) * bytesPerElement
+	}
+
+	// Decimation stage memory
+	if s.decimationStage != nil {
+		usage += int64(len(s.decimationStage.coeffs)) * bytesPerElement
+		usage += int64(cap(s.decimationStage.history)) * bytesPerElement
+	}
+
+	// Cubic interpolation stage memory (symmetry with GetLatency).
+	if s.cubicStage != nil {
+		usage += s.cubicStage.GetMemoryUsage()
 	}
 
 	return usage

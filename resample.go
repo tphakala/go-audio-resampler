@@ -166,7 +166,11 @@ var (
 
 // Validate checks if the configuration is valid.
 func (c *Config) Validate() error {
-	if c.InputRate <= 0 || c.OutputRate <= 0 {
+	// Expressed positively (!(x > 0)) so a NaN rate fails validation instead of
+	// silently passing the <= 0 comparison, which every NaN comparison returns
+	// false for. A NaN rate would otherwise build a pipeline that produces
+	// unresampled passthrough garbage.
+	if !(c.InputRate > 0) || !(c.OutputRate > 0) {
 		return fmt.Errorf("%w: sample rates must be positive", ErrInvalidConfig)
 	}
 
@@ -178,8 +182,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("%w: too many channels (max %d)", ErrInvalidConfig, maxChannels)
 	}
 
+	// Expressed positively so a NaN ratio (e.g. from Inf/Inf) fails the bounds
+	// check instead of silently passing every comparison, matching the guard
+	// in internal/engine/resampler.go.
 	ratio := c.OutputRate / c.InputRate
-	if ratio < minRatioFactor || ratio > maxRatioFactor {
+	if !(ratio >= minRatioFactor && ratio <= maxRatioFactor) {
 		return fmt.Errorf("%w: resampling ratio out of range (%v to %v)", ErrInvalidConfig, minRatioFactor, maxRatioFactor)
 	}
 

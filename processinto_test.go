@@ -9,6 +9,8 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 type processIntoResampler interface {
@@ -139,14 +141,75 @@ func TestProcessInto_ZeroAllocs(t *testing.T) { //nolint:dupl // intentional par
 				t.Fatal(err)
 			}
 
+			var runErr error
 			allocs := testing.AllocsPerRun(100, func() {
 				r.Reset()
-				_, _ = r.ProcessInto(input, output)
+				_, runErr = r.ProcessInto(input, output)
 			})
+			require.NoError(t, runErr)
 
 			if allocs != 0 {
 				t.Fatalf("ProcessInto allocated %.0f times per call; expected 0", allocs)
 			}
+		})
+	}
+}
+
+// assertProcessIntoWarmZeroAllocs warms the resampler once, then asserts that
+// a Reset+ProcessInto cycle allocates nothing under testing.AllocsPerRun.
+// Resetting inside the measured closure keeps the internal buffers at their
+// grown capacity while re-exercising the priming path each iteration.
+func assertProcessIntoWarmZeroAllocs(t *testing.T, r *SimpleResampler, input, output []float64) {
+	t.Helper()
+
+	r.Reset()
+	if _, err := r.ProcessInto(input, output); err != nil {
+		t.Fatal(err)
+	}
+
+	var runErr error
+	allocs := testing.AllocsPerRun(100, func() {
+		r.Reset()
+		_, runErr = r.ProcessInto(input, output)
+	})
+	require.NoError(t, runErr)
+	if allocs != 0 {
+		t.Fatalf("ProcessInto allocated %.0f times per call; expected 0", allocs)
+	}
+}
+
+// TestProcessInto_ZeroAllocs_QualityQuick enforces the zero-allocation
+// invariant for the QualityQuick (cubic) path. doc.go advertises ProcessInto
+// as zero-allocation once warm; on this branch QualityQuick maps to the cubic
+// stage, so that stage must reuse a persistent output buffer like the FIR
+// stages do instead of allocating a fresh slice per call. TestProcessInto_ZeroAllocs
+// covers only the FIR qualities.
+func TestProcessInto_ZeroAllocs_QualityQuick(t *testing.T) {
+	cases := []struct {
+		name            string
+		inRate, outRate float64
+		durSeconds      int
+	}{
+		{"44100to48_quick", 44100, 48000, 3}, // upsample
+		{"48to16_quick", 48000, 16000, 3},    // integer downsample
+		{"48to44100_quick", 48000, 44100, 3}, // non-integer downsample
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := NewEngine(tc.inRate, tc.outRate, QualityQuick)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			inputLen := int(tc.inRate) * tc.durSeconds
+			input := make([]float64, inputLen)
+			for i := range input {
+				input[i] = float64(i) * 1e-5
+			}
+			output := make([]float64, r.EstimateOutput(inputLen))
+
+			assertProcessIntoWarmZeroAllocs(t, r, input, output)
 		})
 	}
 }
@@ -484,14 +547,73 @@ func TestProcessIntoFloat32_ZeroAllocs(t *testing.T) { //nolint:dupl // intentio
 				t.Fatal(err)
 			}
 
+			var runErr error
 			allocs := testing.AllocsPerRun(100, func() {
 				r.Reset()
-				_, _ = r.ProcessInto(input, output)
+				_, runErr = r.ProcessInto(input, output)
 			})
+			require.NoError(t, runErr)
 
 			if allocs != 0 {
 				t.Fatalf("ProcessInto allocated %.0f times per call; expected 0", allocs)
 			}
+		})
+	}
+}
+
+// assertProcessIntoFloat32WarmZeroAllocs is the float32 mirror of
+// assertProcessIntoWarmZeroAllocs: warm the engine once, then assert a
+// Reset+ProcessInto cycle allocates nothing under testing.AllocsPerRun.
+func assertProcessIntoFloat32WarmZeroAllocs(t *testing.T, r *SimpleResamplerFloat32, input, output []float32) {
+	t.Helper()
+
+	r.Reset()
+	if _, err := r.ProcessInto(input, output); err != nil {
+		t.Fatal(err)
+	}
+
+	var runErr error
+	allocs := testing.AllocsPerRun(100, func() {
+		r.Reset()
+		_, runErr = r.ProcessInto(input, output)
+	})
+	require.NoError(t, runErr)
+	if allocs != 0 {
+		t.Fatalf("ProcessInto allocated %.0f times per call; expected 0", allocs)
+	}
+}
+
+// TestProcessIntoFloat32_ZeroAllocs_QualityQuick enforces the zero-allocation
+// invariant for the QualityQuick (cubic) path on the float32 engine, mirroring
+// TestProcessInto_ZeroAllocs_QualityQuick. QualityQuick maps to the cubic
+// stage, which must reuse a persistent output buffer instead of allocating a
+// fresh slice per call.
+func TestProcessIntoFloat32_ZeroAllocs_QualityQuick(t *testing.T) {
+	cases := []struct {
+		name            string
+		inRate, outRate float64
+		durSeconds      int
+	}{
+		{"44100to48_quick", 44100, 48000, 3}, // upsample
+		{"48to16_quick", 48000, 16000, 3},    // integer downsample
+		{"48to44100_quick", 48000, 44100, 3}, // non-integer downsample
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := NewEngineFloat32(tc.inRate, tc.outRate, QualityQuick)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			inputLen := int(tc.inRate) * tc.durSeconds
+			input := make([]float32, inputLen)
+			for i := range input {
+				input[i] = float32(i) * 1e-5
+			}
+			output := make([]float32, r.EstimateOutput(inputLen))
+
+			assertProcessIntoFloat32WarmZeroAllocs(t, r, input, output)
 		})
 	}
 }
@@ -542,9 +664,11 @@ func TestProcessFloat32Into_ZeroAllocs(t *testing.T) {
 				t.Fatal(err)
 			}
 
+			var runErr error
 			allocs := testing.AllocsPerRun(100, func() {
-				_, _ = r.ProcessFloat32Into(input, output)
+				_, runErr = r.ProcessFloat32Into(input, output)
 			})
+			require.NoError(t, runErr)
 
 			if allocs != 0 {
 				t.Fatalf("ProcessFloat32Into allocated %.0f times per call; expected 0", allocs)

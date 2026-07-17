@@ -13,11 +13,12 @@ import (
 // CubicStage implements cubic (4-point, 3rd order) interpolation matching SOXR.
 // This is the fastest resampling method, used for QualityQuick preset.
 type CubicStage[F simdops.Float] struct {
-	ratio   float64
-	phase   float64
-	history [4]F // 4-point window for interpolation
-	histPos int
-	latency int
+	ratio     float64
+	phase     float64
+	history   [4]F // 4-point window for interpolation
+	primed    int  // real samples pushed so far, capped at cubicLatencySamples
+	latency   int
+	outputBuf []F // reused across calls so the warm path allocates nothing
 }
 
 // NewCubicStage creates a new cubic interpolation stage.
@@ -29,15 +30,46 @@ func NewCubicStage[F simdops.Float](ratio float64) *CubicStage[F] {
 	}
 }
 
-// Process resamples input using cubic interpolation.
+// Process resamples input using cubic interpolation. The returned slice is
+// owned by the caller and remains valid across subsequent calls.
 func (c *CubicStage[F]) Process(input []F) ([]F, error) {
+	out, err := c.processZeroCopy(input)
+	if err != nil {
+		return out, err
+	}
+	if len(out) == 0 {
+		// processZeroCopy returns an empty slice that may still alias
+		// c.outputBuf (len 0, cap > 0) during the priming window. Return a
+		// fresh literal so a caller appending to the result is not corrupted
+		// when the next call reuses the internal buffer.
+		return []F{}, nil
+	}
+	// Return a copy so the caller's slice is not corrupted when the next call
+	// reuses the internal output buffer.
+	result := make([]F, len(out))
+	copy(result, out)
+	return result, nil
+}
+
+// processZeroCopy is the allocation-free internal path. The returned slice
+// aliases c.outputBuf and is only valid until the next Process,
+// processZeroCopy, Flush, or Reset call.
+func (c *CubicStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:unparam // error kept for symmetry with the FIR stages' Process signature
 	if len(input) == 0 {
 		return []F{}, nil
 	}
 
-	// Estimate output size
-	outputSize := int(math.Ceil(float64(len(input)) * c.ratio))
-	output := make([]F, 0, outputSize)
+	// Upper bound on the outputs this call can emit: the phase accumulator
+	// advances one input unit per sample and emits at most one output per
+	// 1/ratio of that advance, so the count never exceeds ceil(len*ratio)
+	// plus one boundary-carry sample. Pre-size the reused buffer to that
+	// bound via growStableLen (which adds headroom when it must grow) so
+	// steady-state constant-chunk streaming reuses it without allocating.
+	// append then fills it, so an off-by-one in the bound can never write out
+	// of range; on the warm path the capacity already covers the count and
+	// append allocates nothing.
+	maxOut := int(math.Ceil(float64(len(input))*c.ratio)) + 1
+	out := growStableLen(c.outputBuf, maxOut)[:0]
 
 	for _, sample := range input {
 		// Shift history window
@@ -46,11 +78,27 @@ func (c *CubicStage[F]) Process(input []F) ([]F, error) {
 		c.history[1] = c.history[0]
 		c.history[0] = sample
 
+		// The center point used below (history[2]) needs cubicLatencySamples
+		// real pushes past it before it holds real signal instead of the
+		// zero value left by construction or Reset. Withhold emission during
+		// that priming window: emission starts only once history[2] holds a
+		// real sample. The oldest neighbor (history[3]) can still be the zero
+		// initial state for the first post-priming emission, a bounded startup
+		// characteristic, not fabricated steady-state output. Flush drains the
+		// true tail this reserves.
+		//
+		// Invariant: cubicLatencySamples must equal the shift depth from the
+		// push at history[0] to the center at history[2] (two shifts); the
+		// priming gate relies on that coincidence.
+		if c.primed < cubicLatencySamples {
+			c.primed++
+			continue
+		}
+
 		// Generate output samples
 		for c.phase < 1.0 {
 			// Cubic interpolation matching SOXR
-			y := c.interpolate(c.phase)
-			output = append(output, y)
+			out = append(out, c.interpolate(c.phase))
 
 			// Advance phase
 			c.phase += 1.0 / c.ratio
@@ -60,7 +108,8 @@ func (c *CubicStage[F]) Process(input []F) ([]F, error) {
 		c.phase -= 1.0
 	}
 
-	return output, nil
+	c.outputBuf = out
+	return out, nil
 }
 
 // interpolate performs cubic interpolation matching SOXR's implementation.
@@ -89,16 +138,38 @@ func (c *CubicStage[F]) interpolate(x float64) F {
 	return F(((a*x+b)*x+coefC)*x + s0)
 }
 
-// Flush returns any remaining samples.
+// Flush drains the interpolator's held tail.
+//
+// The 4-point history window holds cubicLatencySamples of latency: the
+// final real samples pushed into Process never reach the withheld-emission
+// center position (see Process) and stay trapped internally when the caller
+// stops feeding input. Flush pads that many zeros through the same Process
+// path to release them, then resets to fresh state so a second Flush
+// returns nothing and a subsequent Process behaves like a new instance.
+//
+// The zero padding is a hard silence assumption at the true end of signal.
+// For a signal with a large sample-to-sample swing right at the boundary,
+// cubic's polynomial fit can overshoot past the padding transition before
+// settling; unlike an FIR filter's convolution, which decays smoothly by
+// construction, point interpolation has no equivalent damping. This is a
+// known, minor characteristic, not something Flush can avoid while still
+// delivering the real tail.
 func (c *CubicStage[F]) Flush() ([]F, error) {
-	// Cubic interpolation doesn't buffer samples
-	return []F{}, nil
+	if c.primed == 0 {
+		// Never fed: no held tail to drain.
+		return []F{}, nil
+	}
+	zeros := make([]F, cubicLatencySamples)
+	out, err := c.Process(zeros)
+	c.Reset()
+	return out, err
 }
 
 // Reset clears internal state.
 func (c *CubicStage[F]) Reset() {
 	c.phase = 0
 	c.history = [4]F{}
+	c.primed = 0
 }
 
 // GetRatio returns the stage's resampling ratio.

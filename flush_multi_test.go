@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"slices"
 	"testing"
 )
 
@@ -98,8 +99,11 @@ func TestFlushMulti_MatchesPerChannelFlush(t *testing.T) {
 		channelInputs[ch] = makeDeterministicInput(rng, n, inRate)
 	}
 
-	// Per-channel reference: process each channel independently with a mono resampler.
-	monoTotals := make([]int, channels)
+	// Per-channel reference: process each channel independently with a mono
+	// resampler, keeping the full Process+Flush sample content (not just its
+	// length) so the multi-channel path can be checked for content, not
+	// merely count.
+	monoOutputs := make([][]float64, channels)
 	for ch := range channels {
 		cfg := &Config{
 			InputRate:  inRate,
@@ -119,7 +123,7 @@ func TestFlushMulti_MatchesPerChannelFlush(t *testing.T) {
 		if err != nil {
 			t.Fatalf("mono Flush ch%d: %v", ch, err)
 		}
-		monoTotals[ch] = len(proc) + len(fl)
+		monoOutputs[ch] = append(slices.Clone(proc), fl...)
 	}
 
 	// Multi-channel: process all channels together.
@@ -148,10 +152,19 @@ func TestFlushMulti_MatchesPerChannelFlush(t *testing.T) {
 	}
 
 	for ch := range channels {
-		multiTotal := len(proc[ch]) + len(flushed[ch])
-		if multiTotal != monoTotals[ch] {
-			t.Errorf("channel %d: multi total %d != mono total %d",
-				ch, multiTotal, monoTotals[ch])
+		multiOutput := append(slices.Clone(proc[ch]), flushed[ch]...)
+		if len(multiOutput) != len(monoOutputs[ch]) {
+			t.Fatalf("channel %d: multi total %d != mono total %d",
+				ch, len(multiOutput), len(monoOutputs[ch]))
+		}
+		// Fatalf (not Errorf) stops at the first mismatch: a real regression
+		// here differs across most of the signal, and letting the loop run
+		// to completion would flood the test log with thousands of lines.
+		for i := range multiOutput {
+			if multiOutput[i] != monoOutputs[ch][i] {
+				t.Fatalf("channel %d: sample %d differs: multi=%v mono=%v",
+					ch, i, multiOutput[i], monoOutputs[ch][i])
+			}
 		}
 	}
 }
@@ -179,5 +192,10 @@ func TestFlushMulti_EmptyResampler(t *testing.T) {
 	}
 	if len(flushed) != 2 {
 		t.Fatalf("FlushMulti returned %d channels, want 2", len(flushed))
+	}
+	for ch, samples := range flushed {
+		if len(samples) != 0 {
+			t.Errorf("channel %d: FlushMulti on an empty resampler returned %d samples, want 0", ch, len(samples))
+		}
 	}
 }

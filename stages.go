@@ -4,6 +4,8 @@
 package resampler
 
 import (
+	"fmt"
+
 	"github.com/tphakala/go-audio-resampler/internal/engine"
 	"github.com/tphakala/go-audio-resampler/internal/pipeline"
 )
@@ -28,19 +30,22 @@ func newCubicStage(ratio float64) pipeline.Stage {
 // For now, we use the polyphase engine which is functionally equivalent but less optimized.
 // A dedicated half-band implementation would store only non-zero coefficients
 // (see soxr/src/half-coefs.h for reference coefficients).
-func newHalfBandStage(ratio float64, filterLength, precision int) pipeline.Stage {
+//
+// The underlying polyphase construction can fail in principle (invalid filter
+// parameters), so the error is propagated rather than silently substituted
+// with a degraded stub. pipeline.BuildPipeline only ever emits StageHalfBand
+// specs with Ratio fixed at halfRatio (0.5) or doubleRatio (2.0), both well
+// inside engine.NewResampler's valid ratio range, so construction failure is
+// not reachable through any public New() input today; propagating the error
+// keeps that guarantee explicit instead of relying on silent substitution.
+func newHalfBandStage(ratio float64, filterLength, precision int) (pipeline.Stage, error) {
 	// Use polyphase stage with factor=2 - functionally equivalent to half-band
 	// The polyphase implementation handles 2x ratios efficiently
 	stage, err := newPolyphaseStage(ratio, filterLength, halfBandFactor, precision)
 	if err != nil {
-		// Fallback to stub if polyphase creation fails
-		return &stubStage{
-			ratio:        ratio,
-			filterLength: filterLength,
-			name:         "halfband",
-		}
+		return nil, fmt.Errorf("failed to create half-band stage: %w", err)
 	}
-	return stage
+	return stage, nil
 }
 
 // newPolyphaseStage creates a polyphase FIR filtering stage using engine.Resampler.
@@ -118,7 +123,9 @@ func newFFTStage(ratio float64, fftSize, precision int) (pipeline.Stage, error) 
 	return newPolyphaseStage(ratio, fftSize, defaultFFTPhases, precision)
 }
 
-// stubStage is a temporary stub implementation for stages not yet implemented.
+// stubStage is a minimal passthrough Stage used only by tests; no production
+// code path constructs it. It nearest-neighbor resamples by the ratio, which
+// is enough to exercise the pipeline.Stage interface without a real filter.
 type stubStage struct {
 	ratio        float64
 	filterLength int

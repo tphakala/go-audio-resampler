@@ -37,12 +37,15 @@
 //	    log.Fatal(err)
 //	}
 //
-// For streaming resampling with a reusable resampler:
+// For streaming resampling with a reusable resampler (one mono channel; for
+// multi-channel audio call [Resampler.ProcessMulti] per chunk and, at
+// end-of-stream, [MultiFlusher.FlushMulti] via a type assertion on the
+// resampler, as shown in the [MultiFlusher] example):
 //
 //	config := &resampler.Config{
 //	    InputRate:  44100,
 //	    OutputRate: 48000,
-//	    Channels:   2,
+//	    Channels:   1,
 //	    Quality:    resampler.QualitySpec{Preset: resampler.QualityHigh},
 //	}
 //	r, err := resampler.New(config)
@@ -59,8 +62,12 @@
 //	    writeOutput(output)
 //	}
 //
-//	// Flush remaining samples
-//	final, _ := r.Flush()
+//	// Flush remaining samples at end of stream
+//	final, err := r.Flush()
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	writeOutput(final)
 //
 // # Zero-Allocation Streaming
 //
@@ -90,6 +97,48 @@
 // [SimpleResamplerFloat32.ProcessInto] and [SimpleResamplerFloat32.EstimateOutput],
 // which run on the float32-native engine and are likewise zero-allocation once
 // warm.
+//
+// # Latency and Real-Time Streaming
+//
+// A streaming resampler has a startup deficit: the internal filter needs a
+// few samples of history before it can emit correctly filtered output, so
+// the first Process calls in a stream withhold roughly [SimpleResampler.Latency]
+// (or [SimpleResamplerFloat32.Latency]) samples that later calls make up.
+// Callers that need a fixed number of output samples per callback, such as
+// a portaudio or miniaudio audio callback, should sit a small FIFO between
+// the resampler and the callback, primed with Latency() samples of silence.
+// Latency() matches the measured deficit to within about 2 samples, so
+// priming with it keeps callbacks fed in practice; any 1-2 sample shortfall
+// self-heals as the deficit-driven buffer sizing catches up:
+//
+//	r, err := resampler.NewEngineFloat32(44100, 48000, resampler.QualityHigh)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	fifo := make([]float32, r.Latency()) // prime with the startup deficit
+//	for chunk := range audioChunks {
+//	    out, err := r.Process(chunk)
+//	    if err != nil {
+//	        log.Fatal(err)
+//	    }
+//	    fifo = append(fifo, out...)
+//	    // deliver fixed-size slices from fifo to the audio callback here
+//	}
+//
+// [SimpleResampler.Flush] and [SimpleResamplerFloat32.Flush] are
+// end-of-stream only. Flush pushes padding through the filter to drain its
+// tail, so calling it once per chunk instead of once at the very end
+// injects that padding into the middle of the stream and produces audible
+// clicks at every chunk boundary. Call Flush exactly once, after the last
+// Process call for the stream; a second Flush call is a no-op that returns
+// an empty slice. [SimpleResampler.Reset] and [SimpleResamplerFloat32.Reset]
+// discard all filter state and are for starting an unrelated stream, never
+// for use between chunks of the same stream.
+//
+// Each SimpleResampler or SimpleResamplerFloat32 processes one channel, so
+// a multi-channel stream keeps one persistent instance per channel alive
+// for the duration of the stream. See examples/streaming for the complete,
+// runnable FIFO pattern.
 //
 // # Quality Presets
 //
@@ -137,10 +186,17 @@
 //	    log.Fatal(err)
 //	}
 //	for chunk := range audioChunks {
-//	    output, _ := r.Process(chunk)  // []float32 in, []float32 out
+//	    output, err := r.Process(chunk)  // []float32 in, []float32 out
+//	    if err != nil {
+//	        log.Fatal(err)
+//	    }
 //	    writeOutput(output)
 //	}
-//	final, _ := r.Flush()  // Returns []float32 (not []float64!)
+//	final, err := r.Flush()  // Returns []float32 (not []float64!)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	writeOutput(final)
 //
 // Helper functions for float32 stereo interleaving are also provided:
 // [InterleaveToStereoFloat32] and [DeinterleaveFromStereoFloat32].
