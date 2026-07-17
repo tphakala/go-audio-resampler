@@ -23,3 +23,30 @@ func TestNewEngine_RejectsNaNRates(t *testing.T) {
 		}
 	}
 }
+
+// Config.Validate (and thus the pipeline constructors New/NewMultiChannel/
+// NewStereo/NewSimple and the preset helpers) must reject NaN rates. NaN-blind
+// comparisons (c.InputRate <= 0, ratio < min) silently pass every branch, so a
+// NaN rate would otherwise build a pipeline that produces unresampled
+// passthrough garbage instead of returning an error.
+func TestNew_RejectsNaNRates(t *testing.T) {
+	nan := math.NaN()
+	for _, c := range []struct{ in, out float64 }{
+		{nan, 48000},
+		{48000, nan},
+		{nan, nan},
+	} {
+		cfg := &Config{
+			InputRate:  c.in,
+			OutputRate: c.out,
+			Channels:   1,
+			Quality:    QualitySpec{Preset: QualityHigh},
+		}
+		if _, err := New(cfg); err == nil {
+			t.Errorf("New(InputRate=%v, OutputRate=%v) accepted NaN", c.in, c.out)
+		}
+		if _, err := NewMultiChannel(c.in, c.out, 2, QualityHigh); err == nil {
+			t.Errorf("NewMultiChannel(%v, %v) accepted NaN", c.in, c.out)
+		}
+	}
+}

@@ -34,8 +34,15 @@ func NewCubicStage[F simdops.Float](ratio float64) *CubicStage[F] {
 // owned by the caller and remains valid across subsequent calls.
 func (c *CubicStage[F]) Process(input []F) ([]F, error) {
 	out, err := c.processZeroCopy(input)
-	if err != nil || len(out) == 0 {
+	if err != nil {
 		return out, err
+	}
+	if len(out) == 0 {
+		// processZeroCopy returns an empty slice that may still alias
+		// c.outputBuf (len 0, cap > 0) during the priming window. Return a
+		// fresh literal so a caller appending to the result is not corrupted
+		// when the next call reuses the internal buffer.
+		return []F{}, nil
 	}
 	// Return a copy so the caller's slice is not corrupted when the next call
 	// reuses the internal output buffer.

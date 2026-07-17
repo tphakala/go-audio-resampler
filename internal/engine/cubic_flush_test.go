@@ -229,6 +229,43 @@ func TestCubicStage_FlushUpdatesSamplesOut(t *testing.T) {
 	}
 }
 
+// Process must return a caller-owned slice even when it emits nothing. During
+// the priming window Process yields zero output, and the empty slice it returns
+// must not alias the internal output buffer: a caller that appends to a
+// zero-length-but-nonzero-capacity result would otherwise have its data
+// silently overwritten by the next Process call reusing that buffer. This pins
+// the owned-empty-slice contract that the sibling stages already satisfy by
+// returning fresh []F{} literals (issue #51).
+func TestCubicStage_ProcessEmptyResultIsOwned(t *testing.T) {
+	c := NewCubicStage[float64](48000.0 / 44100.0)
+
+	// One sample leaves the stage partially primed (primed=1 <
+	// cubicLatencySamples=2), so Process emits nothing.
+	empty, err := c.Process([]float64{1.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("expected empty output during priming, got %d samples", len(empty))
+	}
+
+	// A caller reasonably appends its own data to the returned slice.
+	const sentinel = 12345.0
+	owned := append(empty, sentinel) //nolint:gocritic // deliberately appending to the returned slice to prove it is owned
+
+	// A subsequent Process that emits output must not corrupt the caller's
+	// slice. The input is small enough that Process reuses the same internal
+	// buffer without reallocating, so an aliased empty result would be
+	// overwritten here.
+	if _, err := c.Process([]float64{2.0, 3.0, 4.0, 5.0}); err != nil {
+		t.Fatal(err)
+	}
+
+	if owned[0] != sentinel {
+		t.Errorf("caller's appended value was corrupted: got %v, want %v (Process returned an aliased empty slice)", owned[0], sentinel)
+	}
+}
+
 // Cubic chunked-vs-one-shot equivalence at engine level: the root pin test
 // (streaming_equivalence_test.go) covers QualityLow/Medium/High only, not
 // QualityQuick's cubic path. Feeding the same signal in small chunks versus
