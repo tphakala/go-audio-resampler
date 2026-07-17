@@ -348,7 +348,16 @@ func (s *DFTStage[F]) Flush() ([]F, error) {
 	// producing an extra all-zero output window (issue #51: Process+Flush
 	// emitted about 2 samples more than ceil(n*ratio)).
 	zeros := make([]F, s.tapsPerPhase-1)
-	return s.Process(zeros)
+	out, err := s.Process(zeros)
+	// Flush is terminal: after draining, return the stage to its fresh state.
+	// Otherwise the tapsPerPhase-1 padding zeros stay in the delay line, so the
+	// len(history)==0 guard never fires again: a second Flush keeps emitting
+	// all-zero windows and a post-flush Process convolves new audio against
+	// leftover zeros instead of starting a clean stream (issue #51). Reset() is
+	// the authoritative fresh-state definition; calling it keeps Flush aligned
+	// with it automatically.
+	s.Reset()
+	return out, err
 }
 
 // Reset clears internal state.
@@ -586,7 +595,16 @@ func (s *DFTDecimationStage[F]) Flush() ([]F, error) {
 	// an extra all-zero output window (issue #51: Process+Flush emitted about 2
 	// samples more than ceil(n*ratio)).
 	zeros := make([]F, s.numTaps-1)
-	return s.Process(zeros)
+	out, err := s.Process(zeros)
+	// Flush is terminal: after draining, return the stage to its fresh state.
+	// Otherwise the numTaps-1 padding zeros stay in the delay line, so the
+	// len(history)==0 guard never fires again: a second Flush keeps emitting
+	// all-zero windows and a post-flush Process convolves new audio against
+	// leftover zeros instead of starting a clean stream (issue #51). Reset() is
+	// the authoritative fresh-state definition (history and decimPhase); calling
+	// it keeps Flush aligned with it automatically.
+	s.Reset()
+	return out, err
 }
 
 // Reset clears internal state.
