@@ -343,8 +343,11 @@ func (s *DFTStage[F]) Flush() ([]F, error) {
 		return []F{}, nil
 	}
 
-	// Pad with zeros to flush pipeline
-	zeros := make([]F, s.tapsPerPhase)
+	// Process retains exactly tapsPerPhase-1 history samples, so that many
+	// padding zeros advance the delay line past the last real sample without
+	// producing an extra all-zero output window (issue #51: Process+Flush
+	// emitted about 2 samples more than ceil(n*ratio)).
+	zeros := make([]F, s.tapsPerPhase-1)
 	return s.Process(zeros)
 }
 
@@ -578,8 +581,11 @@ func (s *DFTDecimationStage[F]) Flush() ([]F, error) {
 		return []F{}, nil
 	}
 
-	// Pad with zeros to flush pipeline
-	zeros := make([]F, s.numTaps)
+	// Process retains exactly numTaps-1 history samples, so that many padding
+	// zeros advance the delay line past the last real sample without producing
+	// an extra all-zero output window (issue #51: Process+Flush emitted about 2
+	// samples more than ceil(n*ratio)).
+	zeros := make([]F, s.numTaps-1)
 	return s.Process(zeros)
 }
 
