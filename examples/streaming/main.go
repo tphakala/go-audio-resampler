@@ -31,10 +31,6 @@ func main() {
 		panic(err)
 	}
 	ratio := rs.GetRatio()
-	// Round the input chunk size up rather than truncating: truncating would
-	// underfeed the resampler by a fraction of a sample per callback, which
-	// compounds into periodic FIFO underruns over a long-running stream.
-	inFrames := int(math.Ceil(float64(outFrames) / ratio))
 
 	// Prime the FIFO with the startup deficit so the first callbacks are
 	// fed. This trades Latency() samples of leading silence for a steady
@@ -42,7 +38,34 @@ func main() {
 	fifo := make([]float32, rs.Latency())
 
 	phase := 0.0
+	firstCall := true
 	for callback := 0; callback < 100; callback++ {
+		// Size the input chunk from the FIFO's current deficit rather than
+		// a fixed count. A fixed input size drifts against a fixed output
+		// size whenever ratio does not divide outFrames evenly: truncating
+		// the fixed size underfeeds the resampler and causes underruns
+		// every few seconds, while rounding it up overfeeds and grows the
+		// FIFO (and its latency) without bound over a long-running stream.
+		// Pulling exactly enough input to cover the current shortfall self-
+		// corrects both directions and keeps the FIFO bounded.
+		//
+		// The very first Process call is a special case: a fresh engine
+		// pays its entire Latency() startup deficit on that one call,
+		// regardless of how much input it receives, and the priming above
+		// exists to cover exactly that. So the first request must target a
+		// full outFrames, not outFrames minus the priming already sitting
+		// in the FIFO; netting the priming against the first request would
+		// count the same deficit twice and under-deliver on that call.
+		need := outFrames
+		if !firstCall {
+			need = outFrames - len(fifo)
+			if need < 0 {
+				need = 0
+			}
+		}
+		firstCall = false
+		inFrames := int(math.Ceil(float64(need) / ratio))
+
 		in := make([]float32, inFrames)
 		for i := range in {
 			in[i] = float32(0.5 * math.Sin(phase))
