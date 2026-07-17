@@ -295,16 +295,22 @@ func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:u
 	// Trim output to actual size produced
 	output := s.outputBuf[:outIdx]
 
-	// Consume processed samples from history
-	consumed := int(at>>phaseFracBits) / numPhases
-	if consumed > 0 && consumed <= histLen {
+	// Consume processed samples from history. The accumulator can overshoot
+	// limit by up to one step at severe downsampling ratios, pointing past the
+	// fully available input positions; cap at numIn so the delay line always
+	// retains tapsPerPhase-1 samples and the rebase below matches the trim.
+	consumed := int((at >> phaseFracBits) / numPhases64)
+	if consumed > numIn {
+		consumed = numIn
+	}
+	if consumed > 0 {
 		copy(s.history, s.history[consumed:])
 		s.history = s.history[:histLen-consumed]
 	}
 
-	// Save remainder for next call
-	// Keep the fractional part within one input sample
-	s.at = at - int64(consumed*numPhases)<<phaseFracBits
+	// Save remainder for next call; may legitimately point past the retained
+	// history when the ratio is severe, the next call's input covers it.
+	s.at = at - int64(consumed)*numPhases64<<phaseFracBits
 
 	s.samplesOut += int64(len(output))
 
