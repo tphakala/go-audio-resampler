@@ -15,6 +15,7 @@ func TestCubicStageGetters(t *testing.T) {
 	cs := NewCubicStage[float64](1.5)
 	assert.InDelta(t, 1.5, cs.GetRatio(), 1e-9)
 	assert.Equal(t, cubicLatencySamples, cs.GetLatency())
+	assert.InDelta(t, cubicLatencySamples*1.5, cs.StartupDeficit(), 1e-9)
 	assert.Equal(t, 1, cs.GetMinInput())
 	assert.Equal(t, int64(cubicMemoryUsage), cs.GetMemoryUsage())
 	assert.Equal(t, 4, cs.GetFilterLength()) // Hermite cubic interpolation uses 4 points

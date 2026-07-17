@@ -193,7 +193,9 @@ func (c *CubicStage[F]) GetMemoryUsage() int64 {
 }
 
 // StartupDeficit returns the startup deficit in output samples, un-rounded.
-// Mirrors the cubic branch of Resampler.Latency for direct pipeline use.
+// This is the single source of the cubic deficit formula: the engine
+// Resampler.StartupDeficit delegates here when its cubic stage is active,
+// and the New(config) pipeline consumes it directly per stage.
 func (c *CubicStage[F]) StartupDeficit() float64 {
 	return cubicLatencySamples * c.ratio
 }

@@ -78,7 +78,7 @@ func TestGetLatency_ConfigPath_MatchesMeasuredDeficit(t *testing.T) {
 		{44100, 96000},
 		{48000, 44100},
 	} {
-		for _, preset := range []QualityPreset{QualityLow, QualityMedium, QualityHigh} {
+		for _, preset := range []QualityPreset{QualityQuick, QualityLow, QualityMedium, QualityHigh} {
 			cfg := Config{
 				InputRate:  c.in,
 				OutputRate: c.out,
@@ -111,5 +111,27 @@ func TestGetLatency_ConfigPath_MatchesMeasuredDeficit(t *testing.T) {
 					c.in, c.out, preset, got, measured)
 			}
 		}
+	}
+}
+
+// The duck-typed StartupDeficit fast path covers every production stage type
+// (enforced at compile time in stages.go); the fallback in GetLatency keeps
+// working for stage types without deficit accounting. Pinned here with the
+// test-only stubStage, including the downstream-ratio conversion.
+func TestGetLatency_FallbackWithoutStartupDeficit(t *testing.T) {
+	r := &constantRateResampler{
+		pipeline: &Pipeline{},
+		channels: []*channelResampler{{
+			stages: []Stage{
+				&stubStage{ratio: 2.0, filterLength: 32},
+				&stubStage{ratio: 0.5, filterLength: 8},
+			},
+		}},
+	}
+	// Per-stage fallback deficits in each stage's own output domain:
+	// 32/2*2.0 = 32 and 8/2*0.5 = 2. The first converts through the
+	// downstream ratio 0.5 to 16, so the total is 18.
+	if got := r.GetLatency(); got != 18 {
+		t.Errorf("GetLatency()=%d, want 18", got)
 	}
 }

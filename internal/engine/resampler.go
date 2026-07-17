@@ -372,7 +372,7 @@ func (r *Resampler[F]) GetStatistics() map[string]int64 {
 // wraps this with math.Ceil.
 func (r *Resampler[F]) StartupDeficit() float64 {
 	if r.cubicStage != nil {
-		return cubicLatencySamples * r.ratio
+		return r.cubicStage.StartupDeficit()
 	}
 	deficitIn := 0.0
 	if r.preStage != nil && r.preStage.factor > 1 {

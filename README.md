@@ -148,7 +148,7 @@ func main() {
 
 A streaming resampler has a startup deficit: the internal filter needs a few samples of history before it can emit correctly filtered output, so the first `Process` calls in a stream withhold roughly `Latency()` samples that later calls make up. Callers that need a fixed number of output samples per callback, such as a portaudio or miniaudio audio callback, should sit a small FIFO between the resampler and the callback, primed with `Latency()` samples of silence. `Latency()` matches the measured deficit to within about 2 samples, so priming with it keeps callbacks fed in practice; any 1-2 sample shortfall self-heals because the deficit-driven buffer sizing catches up within the first few callbacks.
 
-`Latency()` is available on `SimpleResampler` and `SimpleResamplerFloat32` (the `NewEngine`/`NewEngineFloat32` path) only. Resamplers built from `New(config)` instead expose `GetLatency()`/`GetInfo()`, which report the filter group delay in the input domain: a different figure, not intended for FIFO priming.
+`Latency()` is available on `SimpleResampler` and `SimpleResamplerFloat32` (the `NewEngine`/`NewEngineFloat32` path). Resamplers built from `New(config)` expose the same figure through `GetLatency()` (and `GetInfo().Latency`): the startup deficit in output samples, accurate to within a few samples across the pipeline's stages, so it primes a FIFO the same way.
 
 ```go
 r, err := resampling.NewEngineFloat32(44100, 48000, resampling.QualityHigh)

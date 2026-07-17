@@ -173,9 +173,8 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 		return filterBank.coeffs[idx]
 	}
 
-	// Allocate coefficient arrays with cubic interpolation support
-	// polyCoeffs = a (base), polyCoeffsB = b (linear), polyCoeffsC = c (quadratic), polyCoeffsD = d (cubic)
-	// Interpolation formula: coef(x) = a + x*(b + x*(c + x*d)) where x ∈ [0, 1)
+	// polyCoeffs = a (base), polyCoeffsB = b (linear), polyCoeffsC = c (quadratic), polyCoeffsD = d (cubic);
+	// evaluated as coef(x) = a + x*(b + x*(c + x*d)) where x ∈ [0, 1)
 	polyCoeffs, polyCoeffsB, polyCoeffsC, polyCoeffsD := buildCubicInterpBanks[F](numPhases, tapsPerPhase, getCoeff)
 
 	return &PolyphaseStage[F]{

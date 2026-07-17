@@ -86,7 +86,11 @@ type phaseWrapResult struct {
 // flat=false it reproduces the original wrap: the neighbour phase is kept
 // within the same tap (phase % numPhases). Everything else, the Catmull-Rom
 // cubic math and the reversed tap storage, is identical (shared code), so any
-// output difference is attributable solely to the boundary indexing.
+// output difference is attributable solely to the boundary indexing. Because
+// both sides share buildCubicInterpBanks, the bank-equality assertion pins
+// the boundary-indexing policy only; the Catmull-Rom math itself is guarded
+// by the THD bounds below and by the active-interpolation THD pins in
+// quality_regression_test.go.
 func buildPhaseInterpBanks(fb *polyphaseFilter, numPhases int, flat bool) (a, b, c, d [][]float64) {
 	coeffs := fb.coeffs
 

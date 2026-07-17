@@ -47,10 +47,10 @@ const (
 	// Active-interpolation ratio THD limits (#54). Measured on 2026-07-17:
 	// 32000->44100 High: -162.05 dB, Medium: -134.95 dB, Low: -144.22 dB;
 	// 44100->64000 High: -151.63 dB, Medium: -135.03 dB, Low: -139.47 dB.
-	// Limits are measured values rounded up with ~5 dB margin. Medium and Low
-	// reuse the regressionMaxTHD_Medium and regressionMaxTHD_Low constants
-	// above since the measured values here fall within margin of those
-	// existing constants; only High needed a dedicated, tighter limit.
+	// High gets a dedicated limit 6.6 dB above its worst measurement. Medium
+	// and Low reuse the regressionMaxTHD_Medium and regressionMaxTHD_Low
+	// constants above, which sit 6.0 and 9.5 dB above the worst measurements
+	// here, so no dedicated constants are needed for them.
 	regressionMaxTHDInterp_High = -145.0 // dB (worst measured: -151.63 dB)
 
 	// Minimum SNR at 1kHz test frequency (more positive = better)

@@ -404,6 +404,14 @@ func (r *constantRateResampler) FlushMulti() ([][]float64, error) {
 	return output, nil
 }
 
+// startupDeficitStage is the accounting contract stages provide for accurate
+// latency reporting: the un-rounded startup deficit in the stage's own
+// output-sample domain. Compile-time assertions in stages.go keep every
+// production stage type on this path.
+type startupDeficitStage interface {
+	StartupDeficit() float64
+}
+
 // GetLatency returns the pipeline's startup deficit in output samples: how
 // many samples early Process calls withhold while the stage filters prime.
 // Each stage's deficit is converted into the final output rate domain
@@ -419,7 +427,7 @@ func (r *constantRateResampler) GetLatency() int {
 	total := 0.0
 	for i, stage := range ch.stages {
 		var deficit float64
-		if s, ok := stage.(interface{ StartupDeficit() float64 }); ok {
+		if s, ok := stage.(startupDeficitStage); ok {
 			deficit = s.StartupDeficit()
 		} else {
 			// Fallback for stages without deficit accounting: group-delay
