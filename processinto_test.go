@@ -9,6 +9,8 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 type processIntoResampler interface {
@@ -139,10 +141,12 @@ func TestProcessInto_ZeroAllocs(t *testing.T) { //nolint:dupl // intentional par
 				t.Fatal(err)
 			}
 
+			var runErr error
 			allocs := testing.AllocsPerRun(100, func() {
 				r.Reset()
-				_, _ = r.ProcessInto(input, output)
+				_, runErr = r.ProcessInto(input, output)
 			})
+			require.NoError(t, runErr)
 
 			if allocs != 0 {
 				t.Fatalf("ProcessInto allocated %.0f times per call; expected 0", allocs)
@@ -163,10 +167,12 @@ func assertProcessIntoWarmZeroAllocs(t *testing.T, r *SimpleResampler, input, ou
 		t.Fatal(err)
 	}
 
+	var runErr error
 	allocs := testing.AllocsPerRun(100, func() {
 		r.Reset()
-		_, _ = r.ProcessInto(input, output)
+		_, runErr = r.ProcessInto(input, output)
 	})
+	require.NoError(t, runErr)
 	if allocs != 0 {
 		t.Fatalf("ProcessInto allocated %.0f times per call; expected 0", allocs)
 	}
@@ -541,10 +547,12 @@ func TestProcessIntoFloat32_ZeroAllocs(t *testing.T) { //nolint:dupl // intentio
 				t.Fatal(err)
 			}
 
+			var runErr error
 			allocs := testing.AllocsPerRun(100, func() {
 				r.Reset()
-				_, _ = r.ProcessInto(input, output)
+				_, runErr = r.ProcessInto(input, output)
 			})
+			require.NoError(t, runErr)
 
 			if allocs != 0 {
 				t.Fatalf("ProcessInto allocated %.0f times per call; expected 0", allocs)
@@ -564,10 +572,12 @@ func assertProcessIntoFloat32WarmZeroAllocs(t *testing.T, r *SimpleResamplerFloa
 		t.Fatal(err)
 	}
 
+	var runErr error
 	allocs := testing.AllocsPerRun(100, func() {
 		r.Reset()
-		_, _ = r.ProcessInto(input, output)
+		_, runErr = r.ProcessInto(input, output)
 	})
+	require.NoError(t, runErr)
 	if allocs != 0 {
 		t.Fatalf("ProcessInto allocated %.0f times per call; expected 0", allocs)
 	}
@@ -654,9 +664,11 @@ func TestProcessFloat32Into_ZeroAllocs(t *testing.T) {
 				t.Fatal(err)
 			}
 
+			var runErr error
 			allocs := testing.AllocsPerRun(100, func() {
-				_, _ = r.ProcessFloat32Into(input, output)
+				_, runErr = r.ProcessFloat32Into(input, output)
 			})
+			require.NoError(t, runErr)
 
 			if allocs != 0 {
 				t.Fatalf("ProcessFloat32Into allocated %.0f times per call; expected 0", allocs)
