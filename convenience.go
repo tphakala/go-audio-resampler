@@ -215,7 +215,9 @@ func (r *SimpleResampler) Latency() int {
 // presetToEngineQuality converts a QualityPreset to engine.Quality.
 func presetToEngineQuality(preset QualityPreset) engine.Quality {
 	switch preset {
-	case QualityQuick, QualityLow:
+	case QualityQuick:
+		return engine.QualityQuick
+	case QualityLow:
 		return engine.QualityLow
 	case QualityMedium:
 		return engine.QualityMedium
