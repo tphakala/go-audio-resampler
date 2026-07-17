@@ -438,38 +438,3 @@ func TestCubicStage_BufferIntegrity(t *testing.T) {
 
 	t.Log("Cubic stage buffer integrity verified")
 }
-
-// TestLinearStage_BufferIntegrity verifies LinearStage doesn't have buffer issues.
-func TestLinearStage_BufferIntegrity(t *testing.T) {
-	stage := NewLinearStage(2.0)
-
-	// Generate test signal
-	input := make([]float64, 1000)
-	for i := range input {
-		input[i] = math.Sin(2.0 * math.Pi * float64(i) / 100)
-	}
-
-	// First process call
-	output1, err := stage.Process(input)
-	require.NoError(t, err, "First Process() failed")
-
-	// Save values
-	savedOutput := make([]float64, len(output1))
-	copy(savedOutput, output1)
-
-	// Second process call
-	input2 := make([]float64, 500)
-	for i := range input2 {
-		input2[i] = math.Cos(2.0 * math.Pi * float64(i) / 50)
-	}
-	_, err = stage.Process(input2)
-	require.NoError(t, err, "Second Process() failed")
-
-	// Verify output1 was not corrupted
-	for i, expected := range savedOutput {
-		assert.InDelta(t, expected, output1[i], 1e-15,
-			"output1[%d] was corrupted", i)
-	}
-
-	t.Log("Linear stage buffer integrity verified")
-}

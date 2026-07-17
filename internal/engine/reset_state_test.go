@@ -145,13 +145,13 @@ func TestResampler_Reset(t *testing.T) {
 	}
 }
 
-// interpolationStage is an interface for testing cubic and linear stages.
+// interpolationStage is an interface for testing interpolation stages.
 type interpolationStage interface {
 	Process([]float64) ([]float64, error)
 	Reset()
 }
 
-// TestInterpolationStages_Reset verifies Reset() properly clears CubicStage and LinearStage state.
+// TestInterpolationStages_Reset verifies Reset() properly clears CubicStage state.
 func TestInterpolationStages_Reset(t *testing.T) {
 	testCases := []struct {
 		name     string
@@ -162,11 +162,6 @@ func TestInterpolationStages_Reset(t *testing.T) {
 			name:     "CubicStage",
 			newStage: func() interpolationStage { return NewCubicStage[float64](2.0) },
 			newFresh: func() interpolationStage { return NewCubicStage[float64](2.0) },
-		},
-		{
-			name:     "LinearStage",
-			newStage: func() interpolationStage { return NewLinearStage(2.0) },
-			newFresh: func() interpolationStage { return NewLinearStage(2.0) },
 		},
 	}
 

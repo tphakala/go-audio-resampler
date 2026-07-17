@@ -78,14 +78,20 @@ type phaseWrapResult struct {
 	numPhases  int
 }
 
-// buildPhaseInterpBanks reproduces the cubic interpolation bank construction
-// from NewPolyphaseStage exactly, parameterised only by the boundary indexing.
-// With flat=true it reproduces the production (fixed) indexing; with flat=false
-// it reproduces the original wrap. Everything else, the Catmull-Rom cubic math
-// and the reversed tap storage, is identical, so any output difference is
-// attributable solely to the boundary indexing.
+// buildPhaseInterpBanks builds the reference interpolation banks through the
+// shared production builder (buildCubicInterpBanks in polyphase_stage.go),
+// varying only the boundary-indexing policy. With flat=true it reproduces the
+// production (fixed) indexing: the neighbour of a phase boundary is the
+// adjacent prototype sample, crossing into the next/previous tap. With
+// flat=false it reproduces the original wrap: the neighbour phase is kept
+// within the same tap (phase % numPhases). Everything else, the Catmull-Rom
+// cubic math and the reversed tap storage, is identical (shared code), so any
+// output difference is attributable solely to the boundary indexing. Because
+// both sides share buildCubicInterpBanks, the bank-equality assertion pins
+// the boundary-indexing policy only; the Catmull-Rom math itself is guarded
+// by the THD bounds below and by the active-interpolation THD pins in
+// quality_regression_test.go.
 func buildPhaseInterpBanks(fb *polyphaseFilter, numPhases int, flat bool) (a, b, c, d [][]float64) {
-	tapsPerPhase := fb.tapsPerPhase
 	coeffs := fb.coeffs
 
 	getCoeff := func(phase, tap int) float64 {
@@ -109,36 +115,7 @@ func buildPhaseInterpBanks(fb *polyphaseFilter, numPhases int, flat bool) (a, b,
 		return coeffs[idx]
 	}
 
-	a = make([][]float64, numPhases)
-	b = make([][]float64, numPhases)
-	c = make([][]float64, numPhases)
-	d = make([][]float64, numPhases)
-
-	for phase := range numPhases {
-		a[phase] = make([]float64, tapsPerPhase)
-		b[phase] = make([]float64, tapsPerPhase)
-		c[phase] = make([]float64, tapsPerPhase)
-		d[phase] = make([]float64, tapsPerPhase)
-
-		for tap := range tapsPerPhase {
-			f0 := getCoeff(phase, tap)
-			f1 := getCoeff(phase+1, tap)
-			fm1 := getCoeff(phase-1, tap)
-			f2 := getCoeff(phase+cubicPhaseOffset, tap)
-
-			av := f0
-			cv := cubicCenterCoeff*(f1+fm1) - f0
-			dv := (1.0 / cubicDivisor) * (f2 - f1 + fm1 - f0 - cubicCMultiplier*cv)
-			bv := f1 - f0 - dv - cv
-
-			revTap := tapsPerPhase - 1 - tap
-			a[phase][revTap] = av
-			b[phase][revTap] = bv
-			c[phase][revTap] = cv
-			d[phase][revTap] = dv
-		}
-	}
-	return a, b, c, d
+	return buildCubicInterpBanks[float64](numPhases, fb.tapsPerPhase, getCoeff)
 }
 
 // processAllPhaseWrap runs Process followed by the terminal Flush and returns

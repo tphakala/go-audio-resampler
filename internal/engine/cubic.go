@@ -192,6 +192,14 @@ func (c *CubicStage[F]) GetMemoryUsage() int64 {
 	return cubicMemoryUsage
 }
 
+// StartupDeficit returns the startup deficit in output samples, un-rounded.
+// This is the single source of the cubic deficit formula: the engine
+// Resampler.StartupDeficit delegates here when its cubic stage is active,
+// and the New(config) pipeline consumes it directly per stage.
+func (c *CubicStage[F]) StartupDeficit() float64 {
+	return cubicLatencySamples * c.ratio
+}
+
 // GetFilterLength returns 0 as cubic doesn't use a filter.
 func (c *CubicStage[F]) GetFilterLength() int {
 	return cubicInterpolationPoints
@@ -204,97 +212,5 @@ func (c *CubicStage[F]) GetPhases() int {
 
 // GetSIMDInfo returns empty as cubic doesn't use SIMD.
 func (c *CubicStage[F]) GetSIMDInfo() string {
-	return ""
-}
-
-// LinearStage implements linear (2-point, 1st order) interpolation.
-// Even faster than cubic but lower quality.
-type LinearStage struct {
-	ratio   float64
-	phase   float64
-	prev    float64
-	latency int
-}
-
-// NewLinearStage creates a new linear interpolation stage.
-func NewLinearStage(ratio float64) *LinearStage {
-	return &LinearStage{
-		ratio:   ratio,
-		phase:   0,
-		latency: linearLatencySamples,
-	}
-}
-
-// Process resamples input using linear interpolation.
-func (l *LinearStage) Process(input []float64) ([]float64, error) {
-	if len(input) == 0 {
-		return []float64{}, nil
-	}
-
-	outputSize := int(math.Ceil(float64(len(input)) * l.ratio))
-	output := make([]float64, 0, outputSize)
-
-	for _, sample := range input {
-		// Generate output samples between previous and current
-		for l.phase < 1.0 {
-			// Linear interpolation: y = (1-x)*prev + x*current
-			y := (1-l.phase)*l.prev + l.phase*sample
-			output = append(output, y)
-
-			// Advance phase
-			l.phase += 1.0 / l.ratio
-		}
-
-		// Update state
-		l.prev = sample
-		l.phase -= 1.0
-	}
-
-	return output, nil
-}
-
-// Flush returns any remaining samples.
-func (l *LinearStage) Flush() ([]float64, error) {
-	return []float64{}, nil
-}
-
-// Reset clears internal state.
-func (l *LinearStage) Reset() {
-	l.phase = 0
-	l.prev = 0
-}
-
-// GetRatio returns the stage's resampling ratio.
-func (l *LinearStage) GetRatio() float64 {
-	return l.ratio
-}
-
-// GetLatency returns the stage latency in samples.
-func (l *LinearStage) GetLatency() int {
-	return l.latency
-}
-
-// GetMinInput returns the minimum input size for processing.
-func (l *LinearStage) GetMinInput() int {
-	return 1
-}
-
-// GetMemoryUsage returns approximate memory usage in bytes.
-func (l *LinearStage) GetMemoryUsage() int64 {
-	return linearMemoryUsage
-}
-
-// GetFilterLength returns 0 as linear doesn't use a filter.
-func (l *LinearStage) GetFilterLength() int {
-	return linearInterpolationPoints
-}
-
-// GetPhases returns 0 as linear doesn't use phases.
-func (l *LinearStage) GetPhases() int {
-	return 0
-}
-
-// GetSIMDInfo returns empty as linear doesn't use SIMD.
-func (l *LinearStage) GetSIMDInfo() string {
 	return ""
 }

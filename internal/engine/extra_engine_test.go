@@ -10,31 +10,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCubicAndLinearStageGetters(t *testing.T) {
+func TestCubicStageGetters(t *testing.T) {
 	// CubicStage float64
 	cs := NewCubicStage[float64](1.5)
 	assert.InDelta(t, 1.5, cs.GetRatio(), 1e-9)
 	assert.Equal(t, cubicLatencySamples, cs.GetLatency())
+	assert.InDelta(t, cubicLatencySamples*1.5, cs.StartupDeficit(), 1e-9)
 	assert.Equal(t, 1, cs.GetMinInput())
 	assert.Equal(t, int64(cubicMemoryUsage), cs.GetMemoryUsage())
 	assert.Equal(t, 4, cs.GetFilterLength()) // Hermite cubic interpolation uses 4 points
 	assert.Equal(t, 0, cs.GetPhases())
 	assert.Empty(t, cs.GetSIMDInfo())
-
-	// LinearStage
-	ls := NewLinearStage(1.5)
-	assert.InDelta(t, 1.5, ls.GetRatio(), 1e-9)
-	assert.Equal(t, linearLatencySamples, ls.GetLatency())
-	assert.Equal(t, 1, ls.GetMinInput())
-	assert.Equal(t, int64(linearMemoryUsage), ls.GetMemoryUsage())
-	assert.Equal(t, 2, ls.GetFilterLength()) // Linear interpolation uses 2 points
-	assert.Equal(t, 0, ls.GetPhases())
-	assert.Empty(t, ls.GetSIMDInfo())
-
-	// LinearStage Flush
-	flushed, err := ls.Flush()
-	require.NoError(t, err)
-	assert.Empty(t, flushed)
 }
 
 func TestStageAdapterGetters(t *testing.T) {

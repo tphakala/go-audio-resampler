@@ -193,4 +193,12 @@ var (
 	_ pipeline.Stage = (*engine.CubicStage[float64])(nil)
 	_ pipeline.Stage = (*engine.StageAdapter[float64])(nil)
 	_ pipeline.Stage = (*stubStage)(nil)
+
+	// Every production stage must provide startup-deficit accounting so
+	// GetLatency never degrades to its group-delay fallback. StageAdapter
+	// satisfies this through its embedded *engine.Resampler; without these
+	// assertions a refactor of that embedding would break latency reporting
+	// silently instead of failing the build.
+	_ startupDeficitStage = (*engine.CubicStage[float64])(nil)
+	_ startupDeficitStage = (*engine.StageAdapter[float64])(nil)
 )

@@ -8,4 +8,3 @@ ignore:
   - "examples/**"
   - "internal/testutil/**"
   - "cmd/resample/**"
-  - "cmd/analyze-filter/**"

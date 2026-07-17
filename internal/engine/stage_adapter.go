@@ -41,10 +41,11 @@ func (s *StageAdapter[F]) GetRatio() float64 {
 // GetLatency returns the stage latency in samples.
 // This is the delay due to FIR filter buffering.
 //
-// This is a filter group-delay heuristic in the input domain, consumed by
-// GetInfo for reporting. Streaming users priming a FIFO with silence should
-// instead use the engine Resampler.Latency() accessor, which reports the
-// startup deficit in output samples.
+// This is a filter group-delay heuristic in the input domain, kept for
+// stage-level diagnostics. Latency reporting flows through StartupDeficit
+// (promoted from the embedded Resampler); streaming users priming a FIFO
+// with silence should use the engine Resampler.Latency() accessor, which
+// reports the startup deficit in output samples.
 func (s *StageAdapter[F]) GetLatency() int {
 	latency := 0
 

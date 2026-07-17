@@ -5,6 +5,7 @@ package resampler
 
 import (
 	"fmt"
+	"math"
 	"sync"
 
 	pipelinepkg "github.com/tphakala/go-audio-resampler/internal/pipeline"
@@ -403,26 +404,42 @@ func (r *constantRateResampler) FlushMulti() ([][]float64, error) {
 	return output, nil
 }
 
-// GetLatency returns the total pipeline latency in samples.
+// startupDeficitStage is the accounting contract stages provide for accurate
+// latency reporting: the un-rounded startup deficit in the stage's own
+// output-sample domain. Compile-time assertions in stages.go keep every
+// production stage type on this path.
+type startupDeficitStage interface {
+	StartupDeficit() float64
+}
+
+// GetLatency returns the pipeline's startup deficit in output samples: how
+// many samples early Process calls withhold while the stage filters prime.
+// Each stage's deficit is converted into the final output rate domain
+// through the downstream stages' ratios before summing.
 func (r *constantRateResampler) GetLatency() int {
 	if r.pipeline == nil || len(r.channels) == 0 {
 		return 0
 	}
-
-	// Use the first channel's stages to calculate latency
 	ch := r.channels[0]
 	if ch == nil || len(ch.stages) == 0 {
 		return 0
 	}
-
-	totalLatency := 0
-	for _, stage := range ch.stages {
-		// Account for stage processing latency and ratio change
-		stageLatency := int(float64(stage.GetLatency()) * stage.GetRatio())
-		totalLatency += stageLatency
+	total := 0.0
+	for i, stage := range ch.stages {
+		var deficit float64
+		if s, ok := stage.(startupDeficitStage); ok {
+			deficit = s.StartupDeficit()
+		} else {
+			// Fallback for stages without deficit accounting: group-delay
+			// heuristic converted to the stage's output domain.
+			deficit = float64(stage.GetLatency()) * stage.GetRatio()
+		}
+		for _, downstream := range ch.stages[i+1:] {
+			deficit *= downstream.GetRatio()
+		}
+		total += deficit
 	}
-
-	return totalLatency
+	return int(math.Ceil(total))
 }
 
 // Reset clears all internal state.
