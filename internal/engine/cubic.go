@@ -81,8 +81,15 @@ func (c *CubicStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:unpar
 		// The center point used below (history[2]) needs cubicLatencySamples
 		// real pushes past it before it holds real signal instead of the
 		// zero value left by construction or Reset. Withhold emission during
-		// that priming window so Process never fabricates output from
-		// implicit pre-silence; Flush drains the true tail this reserves.
+		// that priming window: emission starts only once history[2] holds a
+		// real sample. The oldest neighbor (history[3]) can still be the zero
+		// initial state for the first post-priming emission, a bounded startup
+		// characteristic, not fabricated steady-state output. Flush drains the
+		// true tail this reserves.
+		//
+		// Invariant: cubicLatencySamples must equal the shift depth from the
+		// push at history[0] to the center at history[2] (two shifts); the
+		// priming gate relies on that coincidence.
 		if c.primed < cubicLatencySamples {
 			c.primed++
 			continue

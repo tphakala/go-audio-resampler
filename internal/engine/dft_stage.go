@@ -213,15 +213,10 @@ func (s *DFTStage[F]) Process(input []F) ([]F, error) {
 	if err != nil || len(output) == 0 {
 		return output, err
 	}
-	if s.factor == 1 {
-		// factor==1 is a passthrough, but Process guarantees an owned buffer
-		// (convenience resampleAll relies on it); only processZeroCopy may alias.
-		out := make([]F, len(output))
-		copy(out, output)
-		return out, nil
-	}
-	// Return a copy to prevent caller's slice from being corrupted
-	// if they call Process() or Flush() again (which reuses s.outputBuf)
+	// processZeroCopy may return a slice that aliases the input (at factor==1,
+	// a passthrough) or the internal s.outputBuf; Process guarantees owned
+	// memory that stays valid across subsequent Process/Flush calls, so copy
+	// unconditionally.
 	result := make([]F, len(output))
 	copy(result, output)
 	return result, nil
@@ -231,13 +226,11 @@ func (s *DFTStage[F]) Process(input []F) ([]F, error) {
 // This is the simple path for small inputs.
 // Optimized with half-band detection, ConvolveValidMulti and Interleave2.
 func (s *DFTStage[F]) processChunk(history, output []F, numInputProcessable, factor, tapsPerPhase int) {
-	// Ensure phase buffers are large enough
+	// Ensure phase buffers are large enough. growStableLen adds growth slack
+	// when it must reallocate, matching the buffer policy used elsewhere in
+	// this file so one-sample chunk jitter does not trigger repeated reallocs.
 	for phase := range factor {
-		if cap(s.phaseBufs[phase]) < numInputProcessable {
-			s.phaseBufs[phase] = make([]F, numInputProcessable)
-		} else {
-			s.phaseBufs[phase] = s.phaseBufs[phase][:numInputProcessable]
-		}
+		s.phaseBufs[phase] = growStableLen(s.phaseBufs[phase], numInputProcessable)
 	}
 
 	historySlice := history[:numInputProcessable+tapsPerPhase-1]
@@ -349,15 +342,14 @@ func (s *DFTStage[F]) Flush() ([]F, error) {
 
 	// Process retains exactly tapsPerPhase-1 history samples, so that many
 	// padding zeros advance the delay line past the last real sample without
-	// producing an extra all-zero output window (issue #51: Process+Flush
-	// emitted about 2 samples more than ceil(n*ratio)).
+	// producing an extra all-zero output window.
 	zeros := make([]F, s.tapsPerPhase-1)
 	out, err := s.Process(zeros)
 	// Flush is terminal: after draining, return the stage to its fresh state.
 	// Otherwise the tapsPerPhase-1 padding zeros stay in the delay line, so the
 	// len(history)==0 guard never fires again: a second Flush keeps emitting
 	// all-zero windows and a post-flush Process convolves new audio against
-	// leftover zeros instead of starting a clean stream (issue #51). Reset() is
+	// leftover zeros instead of starting a clean stream. Reset() is
 	// the authoritative fresh-state definition; calling it keeps Flush aligned
 	// with it automatically.
 	s.Reset()
@@ -576,13 +568,11 @@ func (s *DFTDecimationStage[F]) Process(input []F) ([]F, error) {
 	if err != nil || len(output) == 0 {
 		return output, err
 	}
-	if s.factor == 1 {
-		return output, nil
-	}
-	// IMPORTANT: Return a COPY of the output, not a slice of the internal buffer.
-	// Returning s.outputBuf directly would cause buffer corruption on the next
-	// Process() call, as the caller's slice would share the same backing array.
-	// This was the cause of TestResampler_BufferIntegrity failures for 96→48.
+	// processZeroCopy may return a slice that aliases the input (at factor==1,
+	// a passthrough) or the internal s.outputBuf; Process guarantees owned
+	// memory that stays valid across subsequent Process/Flush calls, so copy
+	// unconditionally. Returning s.outputBuf directly caused the
+	// TestResampler_BufferIntegrity failures for 96 to 48.
 	result := make([]F, len(output))
 	copy(result, output)
 	return result, nil
@@ -596,15 +586,14 @@ func (s *DFTDecimationStage[F]) Flush() ([]F, error) {
 
 	// Process retains exactly numTaps-1 history samples, so that many padding
 	// zeros advance the delay line past the last real sample without producing
-	// an extra all-zero output window (issue #51: Process+Flush emitted about 2
-	// samples more than ceil(n*ratio)).
+	// an extra all-zero output window.
 	zeros := make([]F, s.numTaps-1)
 	out, err := s.Process(zeros)
 	// Flush is terminal: after draining, return the stage to its fresh state.
 	// Otherwise the numTaps-1 padding zeros stay in the delay line, so the
 	// len(history)==0 guard never fires again: a second Flush keeps emitting
 	// all-zero windows and a post-flush Process convolves new audio against
-	// leftover zeros instead of starting a clean stream (issue #51). Reset() is
+	// leftover zeros instead of starting a clean stream. Reset() is
 	// the authoritative fresh-state definition (history and decimPhase); calling
 	// it keeps Flush aligned with it automatically.
 	s.Reset()

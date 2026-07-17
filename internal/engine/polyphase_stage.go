@@ -117,8 +117,10 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 	// is invisible for exact-rational ratios (e.g. 44100<->48000 == 80/147, where
 	// the fixed-point sub-phase x is identically 0 so the B/C/D banks are never
 	// consulted), but for ratios with active sub-phase interpolation it collapses
-	// THD+N by 77 to 111 dB (measured -32 to -58 dB wrapped versus -136 to -147 dB
-	// flat). See phase_wrap_measure_test.go for the measurement.
+	// THD+N by a large margin: the committed measurement (phase_wrap_measure_test.go)
+	// reads -54.46 dB wrapped versus -140.72 dB flat at 44100 -> 64000, an 86.26 dB
+	// improvement, with similar magnitude at other active-interpolation ratios
+	// measured during the investigation but not committed as tests.
 	getCoeff := func(phase, tap int) float64 {
 		idx := tap*numPhases + phase
 		if idx < 0 || idx >= len(filterBank.coeffs) {
@@ -311,10 +313,7 @@ func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:u
 	// limit by up to one step at severe downsampling ratios, pointing past the
 	// fully available input positions; cap at numIn so the delay line always
 	// retains tapsPerPhase-1 samples and the rebase below matches the trim.
-	consumed := int((at >> phaseFracBits) / numPhases64)
-	if consumed > numIn {
-		consumed = numIn
-	}
+	consumed := min(int((at>>phaseFracBits)/numPhases64), numIn)
 	if consumed > 0 {
 		copy(s.history, s.history[consumed:])
 		s.history = s.history[:histLen-consumed]
@@ -353,16 +352,15 @@ func (s *PolyphaseStage[F]) Flush() ([]F, error) {
 
 	// Process retains exactly tapsPerPhase-1 history samples, so that many
 	// padding zeros advance the delay line past the last real sample without
-	// producing an extra all-zero output window (issue #51: Process+Flush
-	// emitted about 2 samples more than ceil(n*ratio)). historyBufferMultiplier
-	// is a buffer pre-allocation constant, not a flush-padding amount.
+	// producing an extra all-zero output window. historyBufferMultiplier is a
+	// buffer pre-allocation constant, not a flush-padding amount.
 	zeros := make([]F, s.tapsPerPhase-1)
 	out, err := s.Process(zeros)
 	// Flush is terminal: after draining, return the stage to its fresh state.
 	// Otherwise the tapsPerPhase-1 padding zeros stay in the delay line, so the
 	// len(history)==0 guard never fires again: a second Flush keeps emitting
 	// all-zero windows and a post-flush Process convolves new audio against
-	// leftover zeros instead of starting a clean stream (issue #51). Reset() is
+	// leftover zeros instead of starting a clean stream. Reset() is
 	// the authoritative fresh-state definition (phase accumulator, history, and
 	// sample counters); calling it keeps Flush aligned with it automatically.
 	s.Reset()

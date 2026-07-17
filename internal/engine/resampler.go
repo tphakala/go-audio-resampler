@@ -370,10 +370,10 @@ func (r *Resampler[F]) GetStatistics() map[string]int64 {
 // Real-time consumers should prime their output FIFO with this many samples
 // of silence to keep fixed-size callbacks fed.
 func (r *Resampler[F]) Latency() int {
-	deficitIn := 0.0
 	if r.cubicStage != nil {
 		return int(math.Ceil(cubicLatencySamples * r.ratio))
 	}
+	deficitIn := 0.0
 	if r.preStage != nil && r.preStage.factor > 1 {
 		deficitIn += float64(r.preStage.tapsPerPhase - 1)
 	}
