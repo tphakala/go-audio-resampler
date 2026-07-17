@@ -165,9 +165,9 @@ func TestQualityRegression_THD(t *testing.T) {
 // Active-interpolation THD regression (#54): unlike the exact-rational
 // ratios above, these ratios consult the sub-phase Catmull-Rom
 // interpolation banks, so this pins the whole pipeline against the
-// phase-boundary indexing defect fixed in #56 (stage-level guard:
-// phase_wrap_measure_test.go). Thresholds are measured values plus margin;
-// see constants.
+// phase-boundary indexing defect from #51, fixed in PR #56 (stage-level
+// guard: phase_wrap_measure_test.go). Thresholds are measured values plus
+// margin; see constants.
 func TestQualityRegression_THD_ActiveInterpolation(t *testing.T) {
 	tests := []struct {
 		inputRate, outputRate float64
