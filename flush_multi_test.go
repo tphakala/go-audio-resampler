@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"slices"
 	"testing"
 )
 
@@ -122,7 +123,7 @@ func TestFlushMulti_MatchesPerChannelFlush(t *testing.T) {
 		if err != nil {
 			t.Fatalf("mono Flush ch%d: %v", ch, err)
 		}
-		monoOutputs[ch] = append(append([]float64(nil), proc...), fl...)
+		monoOutputs[ch] = append(slices.Clone(proc), fl...)
 	}
 
 	// Multi-channel: process all channels together.
@@ -151,14 +152,17 @@ func TestFlushMulti_MatchesPerChannelFlush(t *testing.T) {
 	}
 
 	for ch := range channels {
-		multiOutput := append(append([]float64(nil), proc[ch]...), flushed[ch]...)
+		multiOutput := append(slices.Clone(proc[ch]), flushed[ch]...)
 		if len(multiOutput) != len(monoOutputs[ch]) {
 			t.Fatalf("channel %d: multi total %d != mono total %d",
 				ch, len(multiOutput), len(monoOutputs[ch]))
 		}
+		// Fatalf (not Errorf) stops at the first mismatch: a real regression
+		// here differs across most of the signal, and letting the loop run
+		// to completion would flood the test log with thousands of lines.
 		for i := range multiOutput {
 			if multiOutput[i] != monoOutputs[ch][i] {
-				t.Errorf("channel %d: sample %d differs: multi=%v mono=%v",
+				t.Fatalf("channel %d: sample %d differs: multi=%v mono=%v",
 					ch, i, multiOutput[i], monoOutputs[ch][i])
 			}
 		}

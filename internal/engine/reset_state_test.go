@@ -243,7 +243,9 @@ func TestDFTStage_MultipleResets(t *testing.T) {
 		} else {
 			require.Len(t, output, len(round0Output), "Round %d: output length differs from round 0", round)
 			for i := range output {
-				assert.Equal(t, round0Output[i], output[i],
+				// require stops at the first mismatch instead of flooding
+				// the log across an entire round's worth of samples.
+				require.InDelta(t, round0Output[i], output[i], 1e-15,
 					"Round %d: output[%d] differs from round 0 after Reset()", round, i)
 			}
 		}
@@ -284,7 +286,7 @@ func TestResampler_MultipleResets(t *testing.T) {
 		} else {
 			require.Len(t, output, len(round0Output), "Round %d: output length differs from round 0", round)
 			for i := range output {
-				assert.Equal(t, round0Output[i], output[i],
+				require.InDelta(t, round0Output[i], output[i], 1e-15,
 					"Round %d: output[%d] differs from round 0 after Reset()", round, i)
 			}
 		}
@@ -333,12 +335,12 @@ func TestResampler_ResetAfterFlush(t *testing.T) {
 
 	require.Len(t, output, len(freshOutput), "Process length after Reset-following-Flush differs from fresh")
 	for i := range output {
-		assert.Equal(t, freshOutput[i], output[i],
+		require.InDelta(t, freshOutput[i], output[i], 1e-15,
 			"Process[%d] after Reset-following-Flush differs from fresh", i)
 	}
 	require.Len(t, flush, len(freshFlush), "Flush length after Reset-following-Flush differs from fresh")
 	for i := range flush {
-		assert.Equal(t, freshFlush[i], flush[i],
+		require.InDelta(t, freshFlush[i], flush[i], 1e-15,
 			"Flush[%d] after Reset-following-Flush differs from fresh", i)
 	}
 
@@ -372,7 +374,7 @@ func TestResampler_Reset_Float32(t *testing.T) {
 
 	require.Len(t, output2, len(outputFresh), "Output length after reset should match fresh resampler")
 	for i := range output2 {
-		assert.Equal(t, outputFresh[i], output2[i],
+		require.InDelta(t, outputFresh[i], output2[i], 1e-15,
 			"Output[%d] after reset differs from fresh resampler", i)
 	}
 

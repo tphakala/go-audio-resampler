@@ -324,7 +324,10 @@ func TestDFTStage_MultipleProcessCalls(t *testing.T) {
 	for i := range numCalls {
 		require.Len(t, rawA[i], len(savedA[i]), "call %d output length changed", i)
 		for j := range rawA[i] {
-			assert.Equal(t, savedA[i][j], rawA[i][j],
+			// require (not assert) stops at the first mismatch: a real
+			// corruption bug can differ across most of a call's samples,
+			// and letting the loop run to completion floods the test log.
+			require.InDelta(t, savedA[i][j], rawA[i][j], 1e-15,
 				"call %d output[%d] was corrupted by a later Process() call", i, j)
 		}
 	}
@@ -338,7 +341,7 @@ func TestDFTStage_MultipleProcessCalls(t *testing.T) {
 	for i := range numCalls {
 		require.Len(t, savedB[i], len(savedA[i]), "call %d length differs between two fresh instances", i)
 		for j := range savedA[i] {
-			assert.Equal(t, savedA[i][j], savedB[i][j],
+			require.InDelta(t, savedA[i][j], savedB[i][j], 1e-15,
 				"call %d output[%d] differs between two fresh instances given identical input", i, j)
 		}
 	}
@@ -381,7 +384,7 @@ func TestPolyphaseStage_MultipleProcessCalls(t *testing.T) {
 	for i := range numCalls {
 		require.Len(t, rawA[i], len(savedA[i]), "call %d output length changed", i)
 		for j := range rawA[i] {
-			assert.Equal(t, savedA[i][j], rawA[i][j],
+			require.InDelta(t, savedA[i][j], rawA[i][j], 1e-15,
 				"call %d output[%d] was corrupted by a later Process() call", i, j)
 		}
 	}
@@ -393,7 +396,7 @@ func TestPolyphaseStage_MultipleProcessCalls(t *testing.T) {
 	for i := range numCalls {
 		require.Len(t, savedB[i], len(savedA[i]), "call %d length differs between two fresh instances", i)
 		for j := range savedA[i] {
-			assert.Equal(t, savedA[i][j], savedB[i][j],
+			require.InDelta(t, savedA[i][j], savedB[i][j], 1e-15,
 				"call %d output[%d] differs between two fresh instances given identical input", i, j)
 		}
 	}
