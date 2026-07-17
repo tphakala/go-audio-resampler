@@ -365,6 +365,13 @@ figures come from the bundled quality-regression suite and are reproducible with
 > and Medium are a bandwidth-versus-distortion trade, not a simple quality ranking, and
 > libsoxr's own LQ/MQ recipes show the same ordering.
 
+The table above uses 44.1kHz → 48kHz, an exact-rational ratio where the polyphase filter needs no sub-phase interpolation. Ratios that do engage the sub-phase Catmull-Rom interpolation banks are pinned separately (measured 2026-07-17, guarded by `TestQualityRegression_THD_ActiveInterpolation`):
+
+| Conversion      | High       | Medium     | Low        |
+| --------------- | ---------- | ---------- | ---------- |
+| 32kHz → 44.1kHz | -162.05 dB | -134.95 dB | -144.22 dB |
+| 44.1kHz → 64kHz | -151.63 dB | -135.03 dB | -139.47 dB |
+
 ### Custom Quality Settings
 
 ```go
@@ -401,7 +408,7 @@ output32, _ := r32.Process(input32)
 | Mode    | THD @ 1kHz | Use Case                          |
 | ------- | ---------- | --------------------------------- |
 | float64 | -145.25 dB | Maximum precision, critical audio |
-| float32 | -145.01 dB | Higher throughput, general use    |
+| float32 | -145.50 dB | Higher throughput, general use    |
 
 Both modes achieve equivalent quality for most use cases. Use float32 when processing large amounts of audio data where throughput is more important than theoretical precision limits.
 
