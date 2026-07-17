@@ -16,7 +16,7 @@ type CubicStage[F simdops.Float] struct {
 	ratio   float64
 	phase   float64
 	history [4]F // 4-point window for interpolation
-	histPos int
+	primed  int  // real samples pushed so far, capped at cubicLatencySamples
 	latency int
 }
 
@@ -45,6 +45,16 @@ func (c *CubicStage[F]) Process(input []F) ([]F, error) {
 		c.history[2] = c.history[1]
 		c.history[1] = c.history[0]
 		c.history[0] = sample
+
+		// The center point used below (history[2]) needs cubicLatencySamples
+		// real pushes past it before it holds real signal instead of the
+		// zero value left by construction or Reset. Withhold emission during
+		// that priming window so Process never fabricates output from
+		// implicit pre-silence; Flush drains the true tail this reserves.
+		if c.primed < cubicLatencySamples {
+			c.primed++
+			continue
+		}
 
 		// Generate output samples
 		for c.phase < 1.0 {
@@ -89,16 +99,38 @@ func (c *CubicStage[F]) interpolate(x float64) F {
 	return F(((a*x+b)*x+coefC)*x + s0)
 }
 
-// Flush returns any remaining samples.
+// Flush drains the interpolator's held tail.
+//
+// The 4-point history window holds cubicLatencySamples of latency: the
+// final real samples pushed into Process never reach the withheld-emission
+// center position (see Process) and stay trapped internally when the caller
+// stops feeding input. Flush pads that many zeros through the same Process
+// path to release them, then resets to fresh state so a second Flush
+// returns nothing and a subsequent Process behaves like a new instance.
+//
+// The zero padding is a hard silence assumption at the true end of signal.
+// For a signal with a large sample-to-sample swing right at the boundary,
+// cubic's polynomial fit can overshoot past the padding transition before
+// settling; unlike an FIR filter's convolution, which decays smoothly by
+// construction, point interpolation has no equivalent damping. This is a
+// known, minor characteristic, not something Flush can avoid while still
+// delivering the real tail.
 func (c *CubicStage[F]) Flush() ([]F, error) {
-	// Cubic interpolation doesn't buffer samples
-	return []F{}, nil
+	if c.primed == 0 {
+		// Never fed: no held tail to drain.
+		return []F{}, nil
+	}
+	zeros := make([]F, cubicLatencySamples)
+	out, err := c.Process(zeros)
+	c.Reset()
+	return out, err
 }
 
 // Reset clears internal state.
 func (c *CubicStage[F]) Reset() {
 	c.phase = 0
 	c.history = [4]F{}
+	c.primed = 0
 }
 
 // GetRatio returns the stage's resampling ratio.

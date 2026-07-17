@@ -18,7 +18,7 @@ func TestLatency_MatchesMeasuredDeficit(t *testing.T) {
 		{48000, 16000},
 		{48000, 48000},
 	} {
-		for _, q := range []QualityPreset{QualityLow, QualityMedium, QualityHigh} {
+		for _, q := range []QualityPreset{QualityQuick, QualityLow, QualityMedium, QualityHigh} {
 			r, err := NewEngine(c.in, c.out, q)
 			if err != nil {
 				t.Fatal(err)

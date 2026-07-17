@@ -20,12 +20,19 @@ func sineChunk(n int, rate float64) []float64 {
 // subsequent Process must behave exactly like a fresh instance instead of
 // convolving new audio against leftover padding zeros.
 func TestFlushLifecycle(t *testing.T) {
-	for _, c := range []struct{ in, out float64 }{
-		{44100, 48000},
-		{48000, 44100},
-		{48000, 16000},
+	for _, c := range []struct {
+		in, out float64
+		quality QualityPreset
+	}{
+		{44100, 48000, QualityHigh},
+		{48000, 44100, QualityHigh},
+		{48000, 16000, QualityHigh},
+		// QualityQuick routes through CubicStage (reachable from NewEngine
+		// since the QualityQuick mapping fix), which has its own held-tail
+		// lifecycle distinct from the FIR stages' delay lines.
+		{44100, 48000, QualityQuick},
 	} {
-		r, err := NewEngine(c.in, c.out, QualityHigh)
+		r, err := NewEngine(c.in, c.out, c.quality)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -41,10 +48,10 @@ func TestFlushLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(second) != 0 {
-			t.Errorf("%v to %v: second Flush returned %d samples, want 0", c.in, c.out, len(second))
+			t.Errorf("%v to %v q=%v: second Flush returned %d samples, want 0", c.in, c.out, c.quality, len(second))
 		}
 
-		fresh, err := NewEngine(c.in, c.out, QualityHigh)
+		fresh, err := NewEngine(c.in, c.out, c.quality)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,12 +65,12 @@ func TestFlushLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(gotAfterFlush) != len(gotFresh) {
-			t.Fatalf("%v to %v: post-flush Process length %d != fresh %d",
-				c.in, c.out, len(gotAfterFlush), len(gotFresh))
+			t.Fatalf("%v to %v q=%v: post-flush Process length %d != fresh %d",
+				c.in, c.out, c.quality, len(gotAfterFlush), len(gotFresh))
 		}
 		for i := range gotFresh {
 			if gotAfterFlush[i] != gotFresh[i] {
-				t.Fatalf("%v to %v: post-flush Process differs from fresh at %d", c.in, c.out, i)
+				t.Fatalf("%v to %v q=%v: post-flush Process differs from fresh at %d", c.in, c.out, c.quality, i)
 			}
 		}
 	}
