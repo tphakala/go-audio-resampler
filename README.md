@@ -112,11 +112,12 @@ import (
 )
 
 func main() {
-    // Create a resampler for CD to DAT conversion
+    // Create a resampler for CD to DAT conversion (mono; for multi-channel
+    // audio use ProcessMulti, see "Multi-Channel Streaming" below)
     config := &resampling.Config{
         InputRate:  44100,
         OutputRate: 48000,
-        Channels:   2,
+        Channels:   1,
         Quality:    resampling.QualitySpec{Preset: resampling.QualityHigh},
     }
 
@@ -134,11 +135,46 @@ func main() {
         writeOutput(output)
     }
 
-    // Flush remaining samples
-    final, _ := r.Flush()
+    // Flush remaining samples at end of stream
+    final, err := r.Flush()
+    if err != nil {
+        log.Fatal(err)
+    }
     writeOutput(final)
 }
 ```
+
+### Latency and Real-Time Streaming
+
+A streaming resampler has a startup deficit: the internal filter needs a few samples of history before it can emit correctly filtered output, so the first `Process` calls in a stream withhold up to `Latency()` samples that later calls make up. Callers that need a fixed number of output samples per callback, such as a portaudio or miniaudio audio callback, should sit a small FIFO between the resampler and the callback, primed with `Latency()` samples of silence so the first callbacks are already fed.
+
+```go
+r, err := resampling.NewEngineFloat32(44100, 48000, resampling.QualityHigh)
+if err != nil {
+    log.Fatal(err)
+}
+fifo := make([]float32, r.Latency()) // prime with the startup deficit
+
+for chunk := range audioChunks {
+    out, err := r.Process(chunk)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fifo = append(fifo, out...)
+    // deliver fixed-size slices from fifo to the audio callback here
+}
+
+// End of stream: drain the filter tail exactly once.
+tail, err := r.Flush()
+if err != nil {
+    log.Fatal(err)
+}
+fifo = append(fifo, tail...)
+```
+
+`Flush` is end-of-stream only. It pushes padding through the filter to drain its tail, so calling it once per chunk instead of once at the very end injects that padding into the middle of the stream and produces audible clicks at every chunk boundary. Call `Flush` exactly once, after the last `Process` call for the stream; a second `Flush` call is a no-op that returns an empty slice. `Reset` discards all filter state and is for starting an unrelated stream, never for use between chunks of the same stream. Each `SimpleResampler` or `SimpleResamplerFloat32` processes one channel, so a multi-channel stream keeps one persistent instance per channel alive for the duration of the stream.
+
+See [`examples/streaming`](examples/streaming/main.go) for the complete, runnable FIFO pattern.
 
 ### Zero-Allocation Streaming (`ProcessInto`)
 

@@ -115,6 +115,10 @@ func NewMultiChannel(inputRate, outputRate float64, channels int, quality Qualit
 // SimpleResampler provides a simplified interface for basic resampling tasks.
 // It wraps the engine.Resampler directly for maximum performance.
 // Uses float64 precision for maximum quality.
+//
+// Streaming pattern: keep one persistent SimpleResampler per channel, call
+// Process once per chunk of input, and call Flush once at the end of the
+// stream.
 type SimpleResampler struct {
 	engine *engine.Resampler[float64]
 }
@@ -131,7 +135,12 @@ func NewEngine(inputRate, outputRate float64, quality QualityPreset) (*SimpleRes
 	return &SimpleResampler{engine: r}, nil
 }
 
-// Process resamples the input samples.
+// Process resamples one chunk of a single (mono) audio channel.
+// The output length varies from call to call: early calls may withhold up
+// to Latency() samples while the internal filter primes, so len(output)
+// does not track len(input)*GetRatio() on a per-call basis. The returned
+// slice is owned by the caller; it is never aliased by the resampler and
+// stays valid after subsequent calls.
 func (r *SimpleResampler) Process(input []float64) ([]float64, error) {
 	return r.engine.Process(input)
 }
@@ -165,17 +174,27 @@ func (r *SimpleResampler) EstimateOutput(inputLen int) int {
 	return int(float64(inputLen)*r.engine.GetRatio()) + estimateOutputMargin
 }
 
-// Flush returns any remaining buffered samples.
+// Flush drains the remaining buffered samples at end-of-stream. It is
+// end-of-stream only: pushing padding through the filter on every chunk
+// instead of just the last one creates audible edge transients (issue #51).
+// Flush is terminal. After it returns, the instance behaves like a fresh
+// one for output purposes: a second Flush call returns an empty slice, and
+// a subsequent Process call produces output bit-identical to a fresh
+// instance. GetStatistics counters are cumulative and are not reset by
+// Flush.
 func (r *SimpleResampler) Flush() ([]float64, error) {
 	return r.engine.Flush()
 }
 
-// Reset clears internal state.
+// Reset discards all filter state, returning the resampler to its
+// just-constructed condition. It is for starting an unrelated stream, not
+// for use between chunks of one continuous stream: calling it mid-stream
+// destroys the filter's history and causes audible clicks.
 func (r *SimpleResampler) Reset() {
 	r.engine.Reset()
 }
 
-// GetRatio returns the resampling ratio.
+// GetRatio returns the resampling ratio (outputRate / inputRate).
 func (r *SimpleResampler) GetRatio() float64 {
 	return r.engine.GetRatio()
 }
@@ -208,7 +227,13 @@ func presetToEngineQuality(preset QualityPreset) engine.Quality {
 }
 
 // ResampleMono is a convenience function for one-shot mono resampling.
-// It creates a resampler, processes the input, flushes, and returns the result.
+// It creates a resampler, processes the input, flushes, and returns the
+// result. Use this when:
+//   - You have the entire input available upfront (not streaming)
+//   - float64 precision is required (mastering, archival)
+//
+// For real-time or chunked streaming, use NewEngine with Process per chunk
+// instead; see the streaming example.
 func ResampleMono(input []float64, inputRate, outputRate float64, quality QualityPreset) ([]float64, error) {
 	r, err := NewEngine(inputRate, outputRate, quality)
 	if err != nil {
@@ -309,6 +334,10 @@ func DeinterleaveFromStereo(interleaved []float64) (left, right []float64) {
 // returns float64), SimpleResamplerFloat32 keeps everything in float32,
 // eliminating type conversion overhead.
 //
+// Streaming pattern: keep one persistent SimpleResamplerFloat32 per channel,
+// call Process once per chunk of input, and call Flush once at the end of
+// the stream.
+//
 // Example:
 //
 //	r, err := resampler.NewEngineFloat32(44100, 48000, resampler.QualityHigh)
@@ -343,8 +372,13 @@ func NewEngineFloat32(inputRate, outputRate float64, quality QualityPreset) (*Si
 	return &SimpleResamplerFloat32{engine: r}, nil
 }
 
-// Process resamples the input samples.
+// Process resamples one chunk of a single (mono) audio channel.
 // Input and output are both float32, with no type conversion overhead.
+// The output length varies from call to call: early calls may withhold up
+// to Latency() samples while the internal filter primes, so len(output)
+// does not track len(input)*GetRatio() on a per-call basis. The returned
+// slice is owned by the caller; it is never aliased by the resampler and
+// stays valid after subsequent calls.
 func (r *SimpleResamplerFloat32) Process(input []float32) ([]float32, error) {
 	return r.engine.Process(input)
 }
@@ -380,14 +414,25 @@ func (r *SimpleResamplerFloat32) EstimateOutput(inputLen int) int {
 	return int(float64(inputLen)*r.engine.GetRatio()) + estimateOutputMargin
 }
 
-// Flush returns any remaining buffered samples as float32.
+// Flush drains the remaining buffered samples as float32 at end-of-stream.
 // Unlike the main Resampler.Flush() which returns float64, this returns
 // float32 for a consistent float32 workflow.
+//
+// Flush is end-of-stream only: pushing padding through the filter on every
+// chunk instead of just the last one creates audible edge transients (issue
+// #51). Flush is terminal. After it returns, the instance behaves like a
+// fresh one for output purposes: a second Flush call returns an empty
+// slice, and a subsequent Process call produces output bit-identical to a
+// fresh instance. GetStatistics counters are cumulative and are not reset
+// by Flush.
 func (r *SimpleResamplerFloat32) Flush() ([]float32, error) {
 	return r.engine.Flush()
 }
 
-// Reset clears internal state, allowing the resampler to be reused.
+// Reset discards all filter state, returning the resampler to its
+// just-constructed condition. It is for starting an unrelated stream, not
+// for use between chunks of one continuous stream: calling it mid-stream
+// destroys the filter's history and causes audible clicks.
 func (r *SimpleResamplerFloat32) Reset() {
 	r.engine.Reset()
 }
@@ -417,7 +462,10 @@ func (r *SimpleResamplerFloat32) Latency() int {
 // This is the float32 equivalent of ResampleMono. Use this when:
 //   - Your audio data is already in float32 format
 //   - You want ~2x SIMD throughput compared to float64
-//   - 32-bit precision is sufficient (most real-time applications)
+//   - You have the entire input available upfront (not streaming)
+//
+// For real-time or chunked streaming, use NewEngineFloat32 with Process per
+// chunk instead; see the streaming example.
 //
 // For maximum precision (mastering, archival), use ResampleMono instead.
 func ResampleMonoFloat32(input []float32, inputRate, outputRate float64, quality QualityPreset) ([]float32, error) {
