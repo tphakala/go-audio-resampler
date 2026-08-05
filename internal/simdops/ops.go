@@ -47,6 +47,15 @@ type Ops[F Float] struct {
 	//   Σ hist[i] * (a[i] + x*(b[i] + x*(c[i] + x*d[i])))
 	// Used for polyphase resampling with cubic coefficient interpolation.
 	CubicInterpDot func(hist, a, b, c, d []F, x F) F
+
+	// ResampleCubic runs a whole block of polyphase cubic resampling in one call:
+	// the fused, block form of a per-output CubicInterpDot loop. For each output it
+	// steps a fixed-point phase accumulator (at, step) to select the input window
+	// and per-phase coefficient banks a, b, c, d, evaluates the cubic-interpolated
+	// dot, and advances. It returns the number of outputs written and the
+	// accumulator after them (atOut == at + n*step), and is bit-identical to the
+	// per-output CubicInterpDot form on every CPU.
+	ResampleCubic func(out, hist []F, a, b, c, d [][]F, at, step int64, numPhases, tapsPerPhase, fracBits int) (int, int64)
 }
 
 // Pre-instantiated operations for each float type.
@@ -60,6 +69,7 @@ var (
 		Sum:                f32.Sum,
 		Scale:              f32.Scale,
 		CubicInterpDot:     f32.CubicInterpDot,
+		ResampleCubic:      ResampleCubic32,
 	}
 	ops64 = Ops[float64]{
 		DotProductUnsafe:   f64.DotProductUnsafe,
@@ -69,6 +79,7 @@ var (
 		Sum:                f64.Sum,
 		Scale:              f64.Scale,
 		CubicInterpDot:     f64.CubicInterpDot,
+		ResampleCubic:      ResampleCubic64,
 	}
 )
 
