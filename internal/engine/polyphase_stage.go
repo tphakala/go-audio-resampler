@@ -40,8 +40,7 @@ type PolyphaseStage[F simdops.Float] struct {
 	step int64 // Step per output sample in fixed-point
 
 	// Phase extraction constants
-	phaseFracBits int   // Number of bits for sub-phase interpolation
-	phaseFracMask int64 // Mask for extracting fractional bits
+	phaseFracBits int // Number of bits for sub-phase interpolation
 
 	// Input history buffer
 	history []F
@@ -135,7 +134,6 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 	// We use 16 bits for sub-phase precision (65536 sub-phases per phase)
 	// This provides excellent THD at high frequencies while keeping integer math fast
 	const phaseFracBits = 16
-	const phaseFracMask = (1 << phaseFracBits) - 1
 
 	// Compute step as a true fixed-point number with full fractional precision
 	// step = (1/ratio) * numPhases * (1 << phaseFracBits)
@@ -187,7 +185,6 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 		at:            0,
 		step:          step,
 		phaseFracBits: phaseFracBits,
-		phaseFracMask: phaseFracMask,
 		history:       make([]F, 0, tapsPerPhase*historyBufferMultiplier),
 		ops:           ops,
 	}, nil
@@ -250,71 +247,27 @@ func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:u
 	tapsPerPhase := s.tapsPerPhase
 	step := s.step
 	histLen := len(history)
-	phaseFracMask := s.phaseFracMask
 
-	// Establish once that all four coefficient banks are at least numPhases long.
-	// They are allocated together with identical length (numPhases) in
-	// NewPolyphaseStage, so this never fires; it is a BCE hint. Combined with the
-	// in-loop phase guard (0 <= phase < numPhases), the compiler can chain
-	// phase < numPhases <= len(bank) and drop the per-bank, per-sample bounds
-	// checks on polyCoeffs[phase] .. polyCoeffsD[phase] without reslicing. If the
-	// invariant were ever violated we produce no output rather than panic.
+	// The four coefficient banks are allocated together with identical length
+	// (numPhases) in NewPolyphaseStage, so this never fires; it guards the fused
+	// kernel below against a malformed bank set by producing no output rather than
+	// risking an out-of-range access, matching the pre-fusion behaviour.
 	if len(polyCoeffs) < numPhases || len(polyCoeffsB) < numPhases ||
 		len(polyCoeffsC) < numPhases || len(polyCoeffsD) < numPhases {
 		return []F{}, nil
 	}
 
-	// Write outputs through a local slice bounded to numOut (numOut == len(out)).
-	// The loop produces exactly numOut samples so out[outIdx] is always in range.
-	// The compiler still keeps a per-sample bounds check on the write because the
-	// loop is driven by the fixed-point accumulator (at < limit), not by outIdx,
-	// so it cannot relate outIdx to len(out). Leaving it; forcing it out would
-	// need a contorted loop shape for no measurable gain.
+	// The output buffer is sized to numOut; the kernel writes at most that many.
 	out := s.outputBuf[:numOut]
 
-	// Precompute scale factor for converting fractional bits to [0, 1)
-	fracScale := F(1.0 / float64(int64(1)<<phaseFracBits))
-
-	// Main resampling loop with cubic coefficient interpolation.
-	at := s.at
-	outIdx := 0
-	for at < limit {
-		// Extract integer phase and fractional sub-phase from fixed-point accumulator
-		// at = (input_sample * numPhases + integer_phase) << phaseFracBits + frac
-		fullPhase := at >> phaseFracBits
-		div := int(fullPhase / numPhases64)
-		phase := int(fullPhase % numPhases64)
-		frac := at & phaseFracMask
-		x := F(frac) * fracScale
-
-		// Boundary check
-		if div+tapsPerPhase > histLen {
-			break
-		}
-
-		// Establish phase is in [0, numPhases). Combined with the bank-length
-		// guard above (len(bank) >= numPhases), this lets the compiler remove the
-		// per-bank bounds checks on all four coefficient indexings below. phase is
-		// fullPhase % numPhases so this never fires for valid input; it is purely a
-		// BCE hint plus safety net.
-		if phase < 0 || phase >= numPhases {
-			break
-		}
-
-		coeffsA := polyCoeffs[phase]
-		coeffsB := polyCoeffsB[phase]
-		coeffsC := polyCoeffsC[phase]
-		coeffsD := polyCoeffsD[phase]
-		hist := history[div : div+tapsPerPhase]
-
-		// Convolve with cubic coefficient interpolation using SIMD
-		// Computes: sum = Σ hist[i] * (a[i] + x*(b[i] + x*(c[i] + x*d[i])))
-		sum := s.ops.CubicInterpDot(hist, coeffsA, coeffsB, coeffsC, coeffsD, x)
-
-		out[outIdx] = sum
-		outIdx++
-		at += step
-	}
+	// Run the whole block through the fused polyphase cubic kernel (internal/simdops):
+	// the block form of a per-output CubicInterpDot loop. It steps the div/phase/frac
+	// accumulator internally and stops at the first output whose tapsPerPhase window
+	// would run past the history, exactly like the per-output loop it replaces, so
+	// outIdx and the returned accumulator are bit-identical to that form. On amd64 and
+	// arm64 the inner cubic dot is inlined (AVX+FMA / NEON) under the same CPU-feature
+	// gate as CubicInterpDot; elsewhere it is a pure-Go loop over CubicInterpDotUnsafe.
+	outIdx, at := s.ops.ResampleCubic(out, history, polyCoeffs, polyCoeffsB, polyCoeffsC, polyCoeffsD, s.at, step, numPhases, tapsPerPhase, phaseFracBits)
 
 	// Trim output to actual size produced
 	output := s.outputBuf[:outIdx]
