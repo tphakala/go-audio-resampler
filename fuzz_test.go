@@ -10,21 +10,21 @@ import (
 
 func FuzzResamplerNew(f *testing.F) {
 	// Common sample rate pairs
-	f.Add(44100.0, 48000.0, 1, 0)   // CD to DAT
-	f.Add(48000.0, 44100.0, 1, 0)   // DAT to CD
-	f.Add(44100.0, 88200.0, 2, 1)   // 2x upsample
-	f.Add(48000.0, 16000.0, 1, 2)   // downsample
-	f.Add(8000.0, 48000.0, 1, 3)    // telephony to DAT
-	f.Add(44100.0, 48000.0, 6, 4)   // 5.1 surround
+	f.Add(44100.0, 48000.0, 1, 0) // CD to DAT
+	f.Add(48000.0, 44100.0, 1, 0) // DAT to CD
+	f.Add(44100.0, 88200.0, 2, 1) // 2x upsample
+	f.Add(48000.0, 16000.0, 1, 2) // downsample
+	f.Add(8000.0, 48000.0, 1, 3)  // telephony to DAT
+	f.Add(44100.0, 48000.0, 6, 4) // 5.1 surround
 
 	// Edge cases
-	f.Add(1.0, 256.0, 1, 0)           // extreme upsample (at ratio limit)
-	f.Add(256.0, 1.0, 1, 0)           // extreme downsample
-	f.Add(0.0, 48000.0, 1, 0)         // zero input rate
-	f.Add(44100.0, 0.0, 1, 0)         // zero output rate
-	f.Add(-44100.0, 48000.0, 1, 0)    // negative rate
-	f.Add(44100.0, 48000.0, 0, 0)     // zero channels
-	f.Add(44100.0, 48000.0, 300, 0)   // too many channels
+	f.Add(1.0, 256.0, 1, 0)         // extreme upsample (at ratio limit)
+	f.Add(256.0, 1.0, 1, 0)         // extreme downsample
+	f.Add(0.0, 48000.0, 1, 0)       // zero input rate
+	f.Add(44100.0, 0.0, 1, 0)       // zero output rate
+	f.Add(-44100.0, 48000.0, 1, 0)  // negative rate
+	f.Add(44100.0, 48000.0, 0, 0)   // zero channels
+	f.Add(44100.0, 48000.0, 300, 0) // too many channels
 
 	f.Fuzz(func(t *testing.T, inputRate, outputRate float64, channels int, presetInt int) {
 		// Skip values that would cause issues unrelated to what we're testing

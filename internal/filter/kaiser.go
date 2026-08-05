@@ -25,7 +25,6 @@ const (
 	sincCenterTap     = 1.0
 	sincPiMultiplier  = math.Pi
 	sincZeroThreshold = 1e-10
-
 )
 
 // KaiserWindow generates a Kaiser window of the specified length and β parameter.

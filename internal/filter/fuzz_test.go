@@ -13,16 +13,16 @@ func FuzzDesignLowPassFilter(f *testing.F) {
 	f.Add(31, 0.25, 60.0, 1.0)
 	f.Add(63, 0.1, 100.0, 1.0)
 	f.Add(127, 0.4, 150.0, 2.0)
-	f.Add(3, 0.01, 0.0, 1.0)     // minimum taps, zero attenuation
+	f.Add(3, 0.01, 0.0, 1.0)      // minimum taps, zero attenuation
 	f.Add(8191, 0.49, 200.0, 1.0) // maximum taps, high attenuation
 
 	// Boundary/invalid seeds
-	f.Add(0, 0.25, 60.0, 1.0)    // too few taps
-	f.Add(31, 0.0, 60.0, 1.0)    // zero cutoff
-	f.Add(31, 0.5, 60.0, 1.0)    // cutoff at Nyquist
-	f.Add(31, 0.25, -1.0, 1.0)   // negative attenuation
-	f.Add(31, 0.25, 60.0, 0.0)   // zero gain
-	f.Add(31, 0.25, 60.0, -1.0)  // negative gain
+	f.Add(0, 0.25, 60.0, 1.0)   // too few taps
+	f.Add(31, 0.0, 60.0, 1.0)   // zero cutoff
+	f.Add(31, 0.5, 60.0, 1.0)   // cutoff at Nyquist
+	f.Add(31, 0.25, -1.0, 1.0)  // negative attenuation
+	f.Add(31, 0.25, 60.0, 0.0)  // zero gain
+	f.Add(31, 0.25, 60.0, -1.0) // negative gain
 
 	f.Fuzz(func(t *testing.T, numTaps int, cutoffFreq, attenuation, gain float64) {
 		coeffs, err := DesignLowPassFilter(FilterParams{
