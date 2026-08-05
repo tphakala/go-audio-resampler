@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-05
+
+### Changed
+
+- Cubic (`QualityQuick`) resampling now runs through a fused, whole-block
+  polyphase kernel (`ResampleCubic32` / `ResampleCubic64` in `internal/simdops`)
+  instead of a per-output `CubicInterpDot` loop, with AVX+FMA (amd64) and NEON
+  (arm64) kernels under the same CPU-feature gate as the `CubicInterpDot`
+  primitive they build on. The block result is bit-identical to the previous
+  per-output loop on every CPU, tier for tier, and the path still allocates
+  nothing. The isolated kernel benchmark shows roughly 1.6x (64 taps) to 2.4x
+  (20 taps) on the inner cubic dot; on the full pipeline the end-to-end delta is
+  within run-to-run noise. No public API change. (#63)
+- Bumped `github.com/tphakala/simd` to v1.6.0. (#58)
+
 ## [1.5.0] - 2026-07-17
 
 ### Added
@@ -132,7 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   design, quality presets, multi-channel and streaming support, validated against
   libsoxr.
 
-[Unreleased]: https://github.com/tphakala/go-audio-resampler/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/tphakala/go-audio-resampler/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/tphakala/go-audio-resampler/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/tphakala/go-audio-resampler/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/tphakala/go-audio-resampler/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/tphakala/go-audio-resampler/compare/v1.2.0...v1.3.0
