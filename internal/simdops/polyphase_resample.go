@@ -50,11 +50,19 @@ const (
 	polyphaseMaxFracBits64 = 53
 )
 
+// maxInt is the largest value of the platform int type. ResampleCubic uses it to
+// reject inputs whose largest internal input index would not fit in an int (and so
+// could wrap negative and index out of range), keeping the no-op-on-invalid contract
+// honest on 32-bit platforms and against adversarial 64-bit accumulators.
+const maxInt = int(^uint(0) >> 1)
+
 // ResampleCubic32 is the float32 fused polyphase cubic resampler. It validates its
 // inputs and is a no-op returning (0, at) (never a panic) if any of these do not
 // hold: numPhases >= 1, tapsPerPhase >= 1, step >= 1, at >= 0, 0 <= fracBits <= 24,
 // each of a, b, c, d has at least numPhases rows, each of the first numPhases rows
-// has length >= tapsPerPhase, and at + len(out)*step does not overflow int64.
+// has length >= tapsPerPhase, at + len(out)*step does not overflow int64, and the
+// largest input index the block would reach fits in a platform int.
+//
 //nolint:dupl // f32/f64 validation bodies are intentionally parallel; only the element type and the fracBits bound differ.
 func ResampleCubic32(out, hist []float32, a, b, c, d [][]float32, at, step int64, numPhases, tapsPerPhase, fracBits int) (n int, atOut int64) {
 	if numPhases < 1 || tapsPerPhase < 1 || step < 1 || at < 0 ||
@@ -76,12 +84,21 @@ func ResampleCubic32(out, hist []float32, a, b, c, d [][]float32, at, step int64
 	if outLen := int64(len(out)); outLen > 0 && step > (math.MaxInt64-at)/outLen {
 		return 0, at
 	}
+	// The largest input index the loop reaches is maxDiv = (at + len(out)*step) >>
+	// fracBits / numPhases (the prior check makes at + len(out)*step non-overflowing).
+	// If maxDiv + tapsPerPhase would not fit in a platform int, div could wrap negative
+	// and index out of range before the window guard fires, so reject. Realistic
+	// resampler inputs are orders of magnitude below this, so nothing legitimate is rejected.
+	if maxDiv := ((at + int64(len(out))*step) >> uint(fracBits)) / int64(numPhases); maxDiv > int64(maxInt-tapsPerPhase) {
+		return 0, at
+	}
 	n = resampleCubic32(out, hist, a, b, c, d, at, step, numPhases, tapsPerPhase, fracBits)
 	return n, at + int64(n)*step
 }
 
 // ResampleCubic64 is the float64 fused polyphase cubic resampler. It applies the
 // same validation as [ResampleCubic32] with fracBits bounded by 53.
+//
 //nolint:dupl // f32/f64 validation bodies are intentionally parallel; only the element type and the fracBits bound differ.
 func ResampleCubic64(out, hist []float64, a, b, c, d [][]float64, at, step int64, numPhases, tapsPerPhase, fracBits int) (n int, atOut int64) {
 	if numPhases < 1 || tapsPerPhase < 1 || step < 1 || at < 0 ||
@@ -98,6 +115,9 @@ func ResampleCubic64(out, hist []float64, a, b, c, d [][]float64, at, step int64
 		}
 	}
 	if outLen := int64(len(out)); outLen > 0 && step > (math.MaxInt64-at)/outLen {
+		return 0, at
+	}
+	if maxDiv := ((at + int64(len(out))*step) >> uint(fracBits)) / int64(numPhases); maxDiv > int64(maxInt-tapsPerPhase) {
 		return 0, at
 	}
 	n = resampleCubic64(out, hist, a, b, c, d, at, step, numPhases, tapsPerPhase, fracBits)

@@ -179,6 +179,27 @@ func checkValidationNoOps[F Float](t *testing.T, maxFracBits int) {
 func TestResampleCubic32_ValidationNoOps(t *testing.T) { checkValidationNoOps[float32](t, 24) }
 func TestResampleCubic64_ValidationNoOps(t *testing.T) { checkValidationNoOps[float64](t, 53) }
 
+// checkDivOverflowGuard checks that an accumulator large enough that the internal
+// input index would overflow a platform int is rejected as (0, at) rather than
+// panicking, honoring the no-op contract. fracBits 0 and numPhases 1 make the index
+// equal the accumulator; out length 1 keeps at+len(out)*step from overflowing int64
+// (which the earlier overflow check would otherwise catch first).
+func checkDivOverflowGuard[F Float](t *testing.T) {
+	t.Helper()
+	resample := For[F]().ResampleCubic
+	a, b, c, d := makeBanks[F](1, 4)
+	out := make([]F, 1)
+	hist := make([]F, 64)
+	at := int64(math.MaxInt64 - 2)
+	n, atOut := resample(out, hist, a, b, c, d, at, 1, 1, 4, 0)
+	if n != 0 || atOut != at {
+		t.Fatalf("expected no-op (0, %d) for overflowing index, got (%d, %d)", at, n, atOut)
+	}
+}
+
+func TestResampleCubic32_DivOverflowGuard(t *testing.T) { checkDivOverflowGuard[float32](t) }
+func TestResampleCubic64_DivOverflowGuard(t *testing.T) { checkDivOverflowGuard[float64](t) }
+
 func TestResampleCubic32_ZeroAlloc(t *testing.T) {
 	const (
 		numPhases = 80
