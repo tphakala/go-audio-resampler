@@ -38,6 +38,20 @@ Thumbs.db
 # Debug files
 *.log
 
+# Planning, design, and spec docs belong in the issue tracker, not in this public
+# repo. Keep them local or in the tracker; never commit them here.
+PLAN.md
+*_PLAN.md
+*-plan.md
+SPEC.md
+*-spec.md
+*-design.md
+docs/plans/
+docs/specs/
+docs/design/
+docs/research/
+docs/superpowers/
+
 # Claude settings
 .claude/
 
