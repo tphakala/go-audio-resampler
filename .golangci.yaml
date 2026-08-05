@@ -57,6 +57,12 @@ linters:
   settings:
     gocognit:
       min-complexity: 50
+    goconst:
+      # golangci-lint v2.12 bundles goconst v1.10, which walks composite
+      # literals and so flags repeated strings inside table-driven test
+      # cases (golangci-lint #6571). Those are subtest and case-name labels,
+      # not constants worth extracting, so skip test files.
+      ignore-tests: true
     gocritic:
       disabled-checks:
         - commentFormatting
