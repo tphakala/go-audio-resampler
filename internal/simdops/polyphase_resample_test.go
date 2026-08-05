@@ -77,7 +77,10 @@ func checkParity[F Float](t *testing.T) {
 		hist[i] = F(math.Sin(float64(i)*0.017) + 0.3*math.Sin(float64(i)*0.11))
 	}
 	for _, numPhases := range []int{64, 80, 128, 256} {
-		for _, taps := range []int{16, 20, 32, 64, 100} {
+		// taps 2 and 6 fall below the AVX/NEON tap thresholds (8 for f32, 4 for
+		// f64), so they route through the pure-Go fallback; the rest exercise the
+		// vector kernels. Both must be bit-identical to the per-output reference.
+		for _, taps := range []int{2, 6, 16, 20, 32, 64, 100} {
 			a, b, c, d := makeBanks[F](numPhases, taps)
 			for _, r := range rateRegimes {
 				step := stepFor(r.out/r.in, numPhases)
@@ -139,10 +142,15 @@ func TestResampleCubic32_StreamingContinuity(t *testing.T) {
 	}
 }
 
-func TestResampleCubic_ValidationNoOps(t *testing.T) {
-	a, b, c, d := makeBanks[float32](8, 4)
-	out := make([]float32, 16)
-	hist := make([]float32, 64)
+// checkValidationNoOps asserts every invalid-input path returns (0, at) without a
+// panic, through the Ops the production code uses, for element type F. maxFracBits
+// is the type's fracBits ceiling (24 for f32, 53 for f64).
+func checkValidationNoOps[F Float](t *testing.T, maxFracBits int) {
+	t.Helper()
+	resample := For[F]().ResampleCubic
+	a, b, c, d := makeBanks[F](8, 4)
+	out := make([]F, 16)
+	hist := make([]F, 64)
 	cases := []struct {
 		name                      string
 		numPhases, taps, fracBits int
@@ -153,18 +161,23 @@ func TestResampleCubic_ValidationNoOps(t *testing.T) {
 		{"step<1", 8, 4, 16, 0, 0},
 		{"at<0", 8, 4, 16, -1, 100},
 		{"fracBits<0", 8, 4, -1, 0, 100},
-		{"fracBits>24", 8, 4, 25, 0, 100},
-		{"tooFewPhases", 16, 4, 16, 0, 100}, // banks only have 8 rows
+		{"fracBitsTooBig", 8, 4, maxFracBits + 1, 0, 100},
+		{"overflow", 8, 4, 16, 0, math.MaxInt64}, // at + len(out)*step overflows int64
+		{"tooFewPhases", 16, 4, 16, 0, 100},      // banks only have 8 rows
+		{"shortRow", 8, 100, 16, 0, 100},         // 8 rows present, but each shorter than taps
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			n, atOut := ResampleCubic32(out, hist, a, b, c, d, tc.at, tc.step, tc.numPhases, tc.taps, tc.fracBits)
+			n, atOut := resample(out, hist, a, b, c, d, tc.at, tc.step, tc.numPhases, tc.taps, tc.fracBits)
 			if n != 0 || atOut != tc.at {
 				t.Fatalf("expected no-op (0, %d), got (%d, %d)", tc.at, n, atOut)
 			}
 		})
 	}
 }
+
+func TestResampleCubic32_ValidationNoOps(t *testing.T) { checkValidationNoOps[float32](t, 24) }
+func TestResampleCubic64_ValidationNoOps(t *testing.T) { checkValidationNoOps[float64](t, 53) }
 
 func TestResampleCubic32_ZeroAlloc(t *testing.T) {
 	const (
