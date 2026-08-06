@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   2 to 1 allocation per call and from 25.3 to 9.3 KiB/op (-63%), about 9% faster,
   with output bit-identical to before. Public API and behavior are unchanged; a
   new equivalence test pins `Process` output to `ProcessZeroCopy` across the
-  rational, integer-decimation, and cubic paths.
+  rational, integer-decimation, and cubic paths. (#66)
 - Bumped `github.com/tphakala/simd` to v1.8.0 (from v1.6.0). v1.7.0 and v1.8.0
   are additive, drop-in upgrades; the resampler consumes only the `cpu`, `f32`,
   and `f64` primitive groups, which are unchanged, so resampled output stays
