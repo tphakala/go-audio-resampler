@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped `github.com/tphakala/simd` to v1.8.0 (from v1.6.0). v1.7.0 and v1.8.0
+  are additive, drop-in upgrades; the resampler consumes only the `cpu`, `f32`,
+  and `f64` primitive groups, which are unchanged, so resampled output stays
+  bit-identical tier for tier.
+
 ## [1.6.0] - 2026-08-05
 
 ### Changed
