@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `Process` now runs the same zero-copy stage pipeline as `ProcessZeroCopy` and
+  copies only the final result into caller-owned memory, instead of copying
+  every intermediate stage output. On multi-stage conversions (an upsampling
+  pre-stage feeding a decimation or polyphase stage) this drops the intermediate
+  copy and its allocation: the 44100 to 48000 `QualityHigh` benchmark goes from
+  2 to 1 allocation per call and from 25.3 to 9.3 KiB/op (-63%), about 9% faster,
+  with output bit-identical to before. Public API and behavior are unchanged; a
+  new equivalence test pins `Process` output to `ProcessZeroCopy` across the
+  rational, integer-decimation, and cubic paths. (#66)
 - Bumped `github.com/tphakala/simd` to v1.8.0 (from v1.6.0). v1.7.0 and v1.8.0
   are additive, drop-in upgrades; the resampler consumes only the `cpu`, `f32`,
   and `f64` primitive groups, which are unchanged, so resampled output stays

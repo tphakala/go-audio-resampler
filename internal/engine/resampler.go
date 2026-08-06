@@ -180,58 +180,38 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 	return r, nil
 }
 
-// Process resamples the input samples.
-func (r *Resampler[F]) Process(input []F) ([]F, error) { //nolint:dupl // intentional parallel structure with ProcessZeroCopy
-	if len(input) == 0 {
+// Process resamples the input samples. The returned slice is owned by the
+// caller and stays valid across subsequent Process, ProcessZeroCopy, and Flush
+// calls.
+//
+// This is the copying convenience form of [Resampler.ProcessZeroCopy]: it runs
+// the same zero-copy stage pipeline and copies only the final result into
+// freshly owned memory. A multi-stage conversion (an upsampling pre-stage
+// feeding a decimation or polyphase stage) therefore no longer copies the
+// intermediate stage output to owned memory just to hand it to the next stage;
+// the intermediate flows through zero-copy and only the caller-owned result is
+// copied.
+func (r *Resampler[F]) Process(input []F) ([]F, error) {
+	output, err := r.ProcessZeroCopy(input)
+	if err != nil {
+		return nil, err
+	}
+	if len(output) == 0 {
 		return []F{}, nil
 	}
 
-	r.samplesIn += int64(len(input))
-
-	// QualityQuick uses cubic interpolation only
-	if r.cubicStage != nil {
-		output, err := r.cubicStage.Process(input)
-		if err != nil {
-			return nil, fmt.Errorf("cubic stage processing failed: %w", err)
-		}
-		r.samplesOut += int64(len(output))
-		return output, nil
-	}
-
-	// Stage 1: Pre-stage (DFT upsampling) - for upsampling only
-	intermediate := input
-	var err error
-	if r.preStage != nil {
-		intermediate, err = r.preStage.Process(input)
-		if err != nil {
-			return nil, fmt.Errorf("pre-stage processing failed: %w", err)
-		}
-	}
-
-	// Stage 2: Decimation stage (for integer downsampling) OR Polyphase stage
-	output := intermediate
-	if r.decimationStage != nil {
-		// Integer downsampling: use DFT decimation
-		output, err = r.decimationStage.Process(intermediate)
-		if err != nil {
-			return nil, fmt.Errorf("decimation stage processing failed: %w", err)
-		}
-	} else if r.polyphaseStage != nil {
-		// Non-integer ratio: use polyphase
-		output, err = r.polyphaseStage.Process(intermediate)
-		if err != nil {
-			return nil, fmt.Errorf("polyphase stage processing failed: %w", err)
-		}
-	}
-
-	r.samplesOut += int64(len(output))
-	return output, nil
+	// ProcessZeroCopy returns a slice aliasing internal stage buffers (or the
+	// input slice at a passthrough ratio), valid only until the next call. Copy
+	// it into owned memory so the caller's result survives later calls.
+	result := make([]F, len(output))
+	copy(result, output)
+	return result, nil
 }
 
 // ProcessZeroCopy resamples input using the zero-copy internal path.
 // The returned slice aliases internal buffers and is only valid until the
 // next Process, ProcessZeroCopy, or Flush call.
-func (r *Resampler[F]) ProcessZeroCopy(input []F) ([]F, error) { //nolint:dupl // intentional parallel structure with Process
+func (r *Resampler[F]) ProcessZeroCopy(input []F) ([]F, error) {
 	if len(input) == 0 {
 		return []F{}, nil
 	}
