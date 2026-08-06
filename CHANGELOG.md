@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-08-06
+
 ### Changed
 
 - `Process` now runs the same zero-copy stage pipeline as `ProcessZeroCopy` and
@@ -163,7 +165,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   design, quality presets, multi-channel and streaming support, validated against
   libsoxr.
 
-[Unreleased]: https://github.com/tphakala/go-audio-resampler/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/tphakala/go-audio-resampler/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/tphakala/go-audio-resampler/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/tphakala/go-audio-resampler/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/tphakala/go-audio-resampler/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/tphakala/go-audio-resampler/compare/v1.3.0...v1.4.0
