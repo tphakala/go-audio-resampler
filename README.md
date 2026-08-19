@@ -19,7 +19,6 @@
   <a href="https://github.com/tphakala/go-audio-resampler/actions/workflows/govulncheck.yml"><img alt="govulncheck" src="https://github.com/tphakala/go-audio-resampler/actions/workflows/govulncheck.yml/badge.svg"></a>
   <a href="https://codecov.io/gh/tphakala/go-audio-resampler"><img alt="codecov" src="https://codecov.io/gh/tphakala/go-audio-resampler/branch/master/graph/badge.svg"></a>
   <a href="https://pkg.go.dev/github.com/tphakala/go-audio-resampler"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/tphakala/go-audio-resampler.svg"></a>
-  <a href="https://goreportcard.com/report/github.com/tphakala/go-audio-resampler"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/tphakala/go-audio-resampler"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/tphakala/go-audio-resampler"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/tphakala/go-audio-resampler/badge"></a>
 </p>
 
