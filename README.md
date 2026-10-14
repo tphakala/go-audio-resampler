@@ -70,7 +70,7 @@ The library implements polyphase FIR filtering with Kaiser window design for pro
 go get github.com/tphakala/go-audio-resampler
 ```
 
-Requires Go 1.26 or later.
+Requires Go 1.27 or later.
 
 ## Quick Start
 
