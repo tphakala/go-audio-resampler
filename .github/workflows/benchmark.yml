@@ -24,7 +24,8 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: stable
+          go-version: "1.27"
+          check-latest: true
 
       # -run='^$' matches no tests, so this runs ONLY benchmarks. Without it,
       # `go test -bench` also runs the full unit-test suite (in both checkouts),
