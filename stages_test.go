@@ -57,11 +57,9 @@ func TestCreateStage_HalfBand_PropagatesSignature(t *testing.T) {
 	}
 
 	spec := StageSpec{
-		StageSpec: pipeline.StageSpec{
-			Type:         pipeline.StageHalfBand,
-			Ratio:        0.5,
-			FilterLength: 32,
-		},
+		Type:         pipeline.StageHalfBand,
+		Ratio:        0.5,
+		FilterLength: 32,
 	}
 
 	stage, err := createStage(spec, config)
