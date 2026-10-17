@@ -108,6 +108,24 @@ func dftProtoLen(t *testing.T, factor int, q Quality) int {
 	return len(coeffs)
 }
 
+// antiAliasProtoLen returns the length of the prototype filter
+// NewDFTAntiAliasStage designs for soxr's Fn1 = fn, computed from the
+// documented recipe (Fp = qualityToPassbandEnd, Fs = 1, both divided by fn,
+// transition = transitionBandwidthHalf * (Fs - Fp), cutoff = Fs - transition)
+// rather than from the
+// stage's fields.
+func antiAliasProtoLen(t *testing.T, fn float64, q Quality) int {
+	t.Helper()
+	fp := qualityToPassbandEnd(q) / fn
+	fs := 1.0 / fn
+	tr := transitionBandwidthHalf * (fs - fp)
+	coeffs, err := filter.DesignLowPassFilterAuto((fs-tr)*nyquistFraction, tr*nyquistFraction, qualityToAttenuation(q), 1.0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(coeffs)
+}
+
 // TestStageFilterLengthsOdd pins the assumption behind the stage alignment:
 // DFT and decimation prototypes have odd length, so their group delay
 // (N-1)/2 is a whole number of samples. An even length would leave half a
@@ -124,6 +142,18 @@ func TestStageFilterLengthsOdd(t *testing.T) {
 			}
 			if d.numTaps%2 == 0 {
 				t.Errorf("decimation prototype factor=%d quality=%d has even length %d", factor, q, d.numTaps)
+			}
+		}
+		for _, rr := range [][2]float64{{384000, 256000}, {48000, 32000}, {48000, 44100}, {96000, 64000}, {44100, 22000}, {44100, 16000}, {96000, 22050}} {
+			if n := antiAliasProtoLen(t, 2*rr[0]/rr[1], q); n%2 == 0 {
+				t.Errorf("anti-alias prototype %g->%g quality=%d has even length %d", rr[0], rr[1], q, n)
+			}
+			r, err := NewResampler[float64](rr[0], rr[1], q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := len(r.preStage.polyCoeffs[0])*2, antiAliasProtoLen(t, 2*rr[0]/rr[1], q); got < want || got > want+1 {
+				t.Errorf("%g->%g quality=%d: pre-stage taps %d, designed prototype %d", rr[0], rr[1], q, got, want)
 			}
 		}
 	}
@@ -322,7 +352,7 @@ func TestStartupDeficit_EqualsGroupDelay(t *testing.T) {
 		for _, c := range []struct {
 			in, out float64
 			hasPre  bool
-		}{{44100, 48000, true}, {48000, 44100, false}} {
+		}{{44100, 48000, true}, {48000, 44100, false}, {384000, 256000, false}, {44100, 16000, false}} {
 			r, err = NewResampler[float64](c.in, c.out, q)
 			if err != nil {
 				t.Fatal(err)
@@ -333,7 +363,14 @@ func TestStartupDeficit_EqualsGroupDelay(t *testing.T) {
 				t.Fatal(err)
 			}
 			gdInt := (fb.protoLen - 1) / 2
-			preGD := float64((dftProtoLen(t, 2, q)-1)/2) / 2
+			// The pre-stage is an anti-imaging filter when upsampling and an
+			// anti-alias filter at the target Nyquist (Fn1 = 2*in/out) when
+			// downsampling.
+			preLen := dftProtoLen(t, 2, q)
+			if c.out < c.in {
+				preLen = antiAliasProtoLen(t, 2*c.in/c.out, q)
+			}
+			preGD := float64((preLen-1)/2) / 2
 			polyGD := float64(gdInt) / float64(ps.numPhases) / 2
 			want = (preGD + polyGD) * r.ratio
 			if got := r.StartupDeficit(); math.Abs(got-want) > 1e-9 {

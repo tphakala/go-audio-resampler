@@ -154,7 +154,8 @@
 // The library provides several quality presets for common use cases:
 //
 //   - [QualityQuick]: 8-bit precision (~54 dB), lowest CPU usage. Suitable for preview
-//     or real-time with low CPU.
+//     or real-time with low CPU. Cubic interpolation only, like libsoxr's QQ: it has
+//     no anti-alias filter when downsampling.
 //   - [QualityLow]: 16-bit precision (~102 dB). Good for speech and low-bandwidth audio.
 //   - [QualityMedium]: 16-bit precision (~102 dB). Suitable for general music playback.
 //   - [QualityHigh]: 20-bit precision (~126 dB). Recommended for studio production and
@@ -217,11 +218,19 @@
 //	Input -> [DFT Pre-Stage] -> [Polyphase FIR] -> Output
 //	              (2x)            (fine ratio)
 //
-// Integer ratios (2x, 3x) use efficient single-stage processing, while
-// non-integer ratios (44.1kHz→48kHz) use DFT pre-upsampling combined with
-// a polyphase stage. Polyphase decomposition reduces computation by processing
-// only the needed output phases. Cubic coefficient interpolation provides
-// smooth sub-phase transitions for excellent high-frequency THD performance.
+// Integer upsampling (2x, 3x) uses a single DFT stage and integer downsampling
+// (96kHz→48kHz) a single DFT decimation stage whose lowpass sits at the output
+// Nyquist. Non-integer ratios (44.1kHz→48kHz) use a 2x DFT pre-stage combined
+// with a polyphase stage. When upsampling, the pre-stage is the anti-imaging
+// filter; when downsampling, it is the anti-alias lowpass at the output Nyquist
+// and the polyphase stage only interpolates. The pre-stage filter grows with the
+// input/output ratio and is capped at 8191 taps, so the preset's stopband is only
+// guaranteed up to the ratio that cap supports (QualityHigh was measured meeting
+// its stopband at 17.4:1 and reaching only -42 dB at 34.8:1); see the README
+// section "Downsampling anti-aliasing".
+// Polyphase decomposition reduces computation by processing only the needed
+// output phases. Cubic coefficient interpolation provides smooth sub-phase
+// transitions for excellent high-frequency THD performance.
 //
 // # Stereo Processing
 //

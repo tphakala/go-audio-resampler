@@ -218,6 +218,9 @@ type polyphaseFilter struct {
 // This implementation follows soxr's cr.c and filter.c filter design exactly:
 //   - For downsampling WITH pre-stage: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
 //   - For upsampling OR no pre-stage: Fn = 1, Fs = 2 - (Fp1 + (Fs1 - Fp1) * 0.7)
+//     (an image-rejection filter only; when downsampling it is valid because
+//     the DFT pre-stage already carries the anti-alias lowpass at the target
+//     Nyquist, see [NewDFTAntiAliasStage] and libsoxr cr.c:383-387)
 //   - Fp and Fs normalized by Fn before calculating Fc
 //   - Fp adjusted using lsx_inv_f_resp for rolloff compensation
 //
@@ -501,7 +504,10 @@ func ComputePolyphaseFilterParams(numPhases int, ratio, totalIORatio float64, ha
 	// For downsampling WITHOUT pre-stage (hasPreStage=false), soxr intentionally
 	// uses the same formula as upsampling (Fn=1). This case occurs when there's
 	// a 2x upsampling pre-stage (preM=0 in soxr terms), so the polyphase stage
-	// sees Fn=1 normalization and uses the anti-imaging formula.
+	// sees Fn=1 normalization and uses the anti-imaging formula. That is only
+	// correct because the 2x pre-stage is designed as the anti-alias lowpass at
+	// the target Nyquist (NewDFTAntiAliasStage, libsoxr cr.c:383-387); this
+	// polyphase filter does not attenuate content above the target Nyquist.
 	if !params.IsUpsampling && hasPreStage {
 		// Downsampling WITH pre-stage: Fn = 2 * mult, Fs = 3 + |Fs1 - 1|
 		params.Fn = soxrDownsamplingFnFactor * params.Mult

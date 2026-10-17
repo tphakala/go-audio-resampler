@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Behaviour change: non-integer downsampling now anti-aliases.** Before, a
+  conversion such as 48000 to 32000, 48000 to 44100 or 384000 to 256000 had no
+  lowpass at the output Nyquist: a tone between the output Nyquist and the input
+  Nyquist passed at 0 dB and folded straight into the output band, and a 120 dB
+  `sox spectrogram` of a 384000 to 256000 `QualityHigh` clip differed from
+  `sox rate` in 27 percent of its pixels (raster-equal 0.7285). The 2x DFT
+  pre-stage is now designed as libsoxr designs it (`cr.c:383-387`), as a lowpass
+  with its stopband at the output Nyquist, using the same recipe as the integer
+  decimation stage; the polyphase stage after it still only rejects images.
+  Measured alias rejection (single tones from 1.001 to 1.5 times the output
+  Nyquist, float64): 0 dB before; now -108 (Low), -110 (Medium), -135 (High), -180
+  (engine VeryHigh), -157 (24-bit) and -204 dB (32-bit), each at or past the
+  preset's stopband. The passband edge matches the integer decimation path (High:
+  -3 dB at 0.953 of the output Nyquist; libsoxr HQ 0.950) and is flat to 0.0001 dB
+  up to 0.9 of it for Medium and above. The same 120 dB spectrogram is now
+  raster-equal 0.9966 with 26 of 132098 pixels more than two palette steps
+  apart.
+  - **Conversions that change:** non-integer downsampling on every entry point
+    (`NewEngine`, `NewEngineFloat32`, `New`, `ResampleMono*`, `ResampleStereo*`,
+    `cmd/resample-wav`), and `New` downsampling by any ratio that is not a power
+    of two, including integer ones such as 48000 to 16000 (`New` factors out 2:1
+    half-band stages and hands the non-integer remainder to the engine).
+    Output samples change, and content between roughly 0.95 of the output
+    Nyquist and the input Nyquist is now removed instead of folded.
+  - **Latency grows.** `Latency()` and `GetLatency()` follow the longer filter and
+    still match the measured startup deficit. `NewEngine`, High, 48000 to 44100:
+    89 to 201; 384000 to 256000: 66 to 198; `QualityMedium` 49 to 152 (384000 to
+    256000); `QualityLow` falls (68 to 48 at 48000 to 44100). On `New`,
+    48000 to 44100 High goes 105 to 241 and VeryHigh 135 to 319. Hard-coded
+    `Latency()` values break. The startup transient also lasts longer in input
+    samples, so a first small chunk can return no output; a FIFO primed with
+    `Latency()` samples still self-heals as documented. `GetInfo()` reports the
+    longer filter length and memory use.
+  - **CPU cost rises for the affected conversions.** Measured with
+    `go test -bench` and benchstat (10 runs on amd64, 5 on arm64): the float32
+    `ProcessInto` benchmark `BenchmarkProcessIntoFloat32_Warm_384to256_High`
+    (65536-sample chunks, `QualityHigh`) goes from 6.24 ms to 14.49 ms per chunk
+    on a Raspberry Pi 5 (about 37 ms to 85 ms of CPU per second of audio, still
+    about 12x real time on one core) and from 1.70 ms to 3.36 ms on an i7-1260P
+    (noisy, 10 runs, +98 percent). `Throughput_{Medium,High,VeryHigh}_48kTo32k`
+    rise 2.5x on arm64 (Pi 5: 6.09, 7.94, 10.98 ms to 15.45, 20.16, 28.32 ms).
+    `QualityLow` and `QualityQuick`, upsampling and integer decimation are
+    unchanged (`Throughput_Low_48kTo32k` is 4.7 percent faster on the Pi), and
+    `ProcessInto` still allocates nothing once warm.
+  - **Ratio limit.** The pre-stage filter grows about linearly with the
+    input/output ratio and is capped at 8191 taps, so the preset's stopband is
+    only guaranteed up to the ratio that cap supports. Measured (`NewEngine`,
+    float64): `QualityHigh` meets 126 dB at 11.0:1 (-134.6 dB) and 17.4:1 (-131.5
+    dB) but reaches only -42.4 dB at 34.8:1 (384000 to 11025); `QualityMedium`
+    is -109.3 dB, -109.5 dB and -55.8 dB at the same three ratios. This was 0 dB
+    before. Ratios between 17.4:1 and 34.8:1 are not measured. `New` never hands
+    the engine more than 2:1. Integer decimation is limited by the same cap
+    (384000 to 8000, High: -89.9 dB measured).
+  - **`New` at `QualityMedium`** reaches the engine's Low filter (the 16-bit
+    Medium preset maps to `engine.QualityLow`), so it is -3 dB at 0.824 of the
+    output Nyquist, while `NewEngine` Medium is flat to 0.94. This mapping is
+    unchanged and tracked in #76.
+  - **Unchanged:** `QualityQuick` (cubic only, no anti-alias filter when
+    downsampling, as libsoxr QQ), unity conversions, upsampling, integer
+    decimation on the engine path (all pinned bit-for-bit by new golden
+    checksums captured on amd64 and arm64 hardware before the change), total
+    output length for any input length and chunking, and streaming equals
+    one-shot.
+
 ## [1.8.0] - 2026-10-17
 
 ### Changed

@@ -26,6 +26,11 @@ const (
 	alignSineSec = 0.25
 )
 
+// 96000 to 22050 is not listed: on the New path its polyphase stage leaves a
+// residual of 0.0016 output samples, which is 0.0068 input samples at this
+// ratio, above alignTolInput. The residual is the same before and after the
+// anti-alias pre-stage (measured on v1.8.0), so it is the documented polyphase
+// rounding, not a pre-stage error.
 var alignRatios = [][2]float64{
 	{48000, 24000},   // decimation by 2
 	{48000, 16000},   // decimation by 3
@@ -39,6 +44,9 @@ var alignRatios = [][2]float64{
 	{384000, 256000}, // 3:2
 	{44100, 64000},   // active sub-phase interpolation
 	{32000, 44100},   // active sub-phase interpolation
+	{48000, 32000},   // anti-alias pre-stage plus polyphase
+	{96000, 64000},   // anti-alias pre-stage plus polyphase
+	{44100, 16000},   // anti-alias pre-stage, long filter
 	{48000, 48000},   // unity
 }
 
@@ -439,7 +447,7 @@ func TestAlignment_ImpulseAtStreamStart(t *testing.T) {
 // at or after the chain's group delay (Latency() output samples, converted to
 // input samples), so the whole filter response is inside the stream.
 func TestAlignment_ImpulseNearStreamStartMultiStage(t *testing.T) {
-	for _, rr := range [][2]float64{{8000, 44100}, {8000, 48000}, {11025, 44100}, {22050, 48000}} {
+	for _, rr := range [][2]float64{{8000, 44100}, {8000, 48000}, {11025, 44100}, {22050, 48000}, {48000, 32000}, {48000, 44100}} {
 		for _, q := range []QualityPreset{QualityLow, QualityHigh} {
 			e, err := NewEngine(rr[0], rr[1], q)
 			if err != nil {

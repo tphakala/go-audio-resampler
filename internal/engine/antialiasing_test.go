@@ -698,6 +698,10 @@ func measureDownsamplingAntiAliasing(inputRate, outputRate float64, quality Qual
 	}, nil
 }
 
+// psdAntiAliasFloorDB is the attenuation the PSD-based downsampling measure
+// must reach at QualityVeryHigh (see TestAntiAliasing_Downsampling).
+const psdAntiAliasFloorDB = 130.0
+
 // TestAntiAliasing_Downsampling tests anti-aliasing for downsampling use cases
 // This is critical for BirdNET v3 and Google Perch v2 which use 32kHz audio
 func TestAntiAliasing_Downsampling(t *testing.T) {
@@ -726,18 +730,19 @@ func TestAntiAliasing_Downsampling(t *testing.T) {
 			t.Logf("Output alias target peak:     %.2f dB", result.OutputAliasTargetPeak)
 			t.Logf("ANTI-ALIASING ATTENUATION:    %.2f dB", result.Attenuation)
 
-			// For integer-ratio downsampling (e.g. 96→48), the DFT-only path provides
-			// good stopband rejection. For non-integer ratios, the polyphase path has
-			// limited stopband rejection — log as informational.
-			ratio := tc.inputRate / tc.outputRate
-			if math.Abs(ratio-math.Round(ratio)) < 1e-9 {
-				if result.Attenuation < minStopbandAttenuation {
-					t.Errorf("Anti-aliasing attenuation %.2f dB is below minimum %.2f dB",
-						result.Attenuation, minStopbandAttenuation)
-				}
-			} else {
-				t.Logf("NOTE: non-integer downsampling (%.2f:1) — attenuation %.2f dB (informational, polyphase path limitation)",
-					ratio, result.Attenuation)
+			// Every row must meet the documented stopband, integer or not: the
+			// non-integer chain low-passes at the target Nyquist in its DFT
+			// pre-stage. The PSD measure floors lower than the tone oracle in
+			// TestAntiAliasing_NonIntegerDownsampling_MeetsStopband (measured
+			// 142 dB and up for the non-integer rows, 133 dB for 96k to 48k),
+			// so it carries a 130 dB floor on top of the shared minimum.
+			if result.Attenuation < minStopbandAttenuation {
+				t.Errorf("Anti-aliasing attenuation %.2f dB is below minimum %.2f dB",
+					result.Attenuation, minStopbandAttenuation)
+			}
+			if result.Attenuation < psdAntiAliasFloorDB {
+				t.Errorf("Anti-aliasing attenuation %.2f dB is below the %.0f dB PSD floor",
+					result.Attenuation, psdAntiAliasFloorDB)
 			}
 		})
 	}

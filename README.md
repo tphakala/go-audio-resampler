@@ -355,7 +355,7 @@ figures come from the bundled quality-regression suite and are reproducible with
 - **High and VeryHigh presets match or exceed libsoxr quality**, within 0.5 dB (High slightly better, VeryHigh essentially identical)
 - **Low and Medium track libsoxr closely**: Medium is within ~1 dB and Low within ~4 dB, trading a little stopband headroom for lower passband ripple
 - All presets achieve SNR (Signal-to-Noise Ratio) matching libsoxr within measurement tolerance
-- Downsampling (e.g., 48kHz → 32kHz) shows substantially better THD (below -190 dB across presets) thanks to the anti-aliasing filters
+- Downsampling removes content above the output Nyquist: alias rejection meets each preset's stopband on integer and non-integer ratios, up to the ratio limit given under [Downsampling anti-aliasing](#downsampling-anti-aliasing)
 
 > **Why does Low show better THD than Medium?** Both presets are 16-bit (same noise
 > floor), so the difference is filter geometry, not precision. Low keeps its passband
@@ -372,6 +372,25 @@ The table above uses 44.1kHz → 48kHz, an exact-rational ratio where the polyph
 | --------------- | ---------- | ---------- | ---------- |
 | 32kHz → 44.1kHz | -162.05 dB | -134.95 dB | -144.22 dB |
 | 44.1kHz → 64kHz | -151.63 dB | -135.03 dB | -139.47 dB |
+
+### Downsampling anti-aliasing
+
+Non-integer downsampling (for example 48kHz → 32kHz or 48kHz → 44.1kHz) low-passes at the output Nyquist in its 2x DFT pre-stage, as libsoxr does, and the polyphase stage after it only interpolates. The table shows the worst alias level of single tones between 1.001 and 1.5 times the output Nyquist after they fold into the output band, and the -3 dB point of the passband as a fraction of the output Nyquist. Go figures are float64 through `NewEngine` and `New`; the float32 engine measures within 0.3 dB. They are guarded by `TestAntiAliasing_NonIntegerDownsampling_MeetsStopband`, `TestNonIntegerDownsampling_PublicPaths_MeetStopband` and `TestPassbandEdge_NonIntegerDownsampling_MatchesDecimationPath`.
+
+| Preset   | libsoxr 48k→32k / 48k→44.1k | `NewEngine` 48k→32k / 48k→44.1k | `New` 48k→32k / 48k→44.1k | -3 dB point (`NewEngine`) |
+| -------- | --------------------------- | ------------------------------- | ------------------------- | ------------------------- |
+| Low      | -103.3 / -110.8 dB          | -109.2 / -108.3 dB              | -109.2 / -108.3 dB        | 0.824                     |
+| Medium   | -106.5 / -111.3 dB          | -109.6 / -109.6 dB              | -109.2 / -108.3 dB        | 0.951 (`New`: 0.824)      |
+| High     | -130.0 / -135.2 dB          | -135.0 / -135.3 dB              | -157.0 / -156.9 dB        | 0.953                     |
+| VeryHigh | -178.1 / -183.0 dB          | -135.0 / -135.3 dB              | -204.5 / -204.2 dB        | 0.953                     |
+
+libsoxr columns are its LQ, MQ, HQ and VHQ recipes (libsoxr 0.1.3) measured the same way; their -3 dB points are 0.850 (LQ) and 0.950 to 0.951 (MQ, HQ, VHQ). `NewEngine` sends both High and VeryHigh to the engine's High filter, so its VeryHigh row equals High; `New` reaches the 32-bit filter for VeryHigh. This mapping is tracked in issue #76.
+
+Three things to know:
+
+- **`QualityMedium` on `New`.** `New(&Config)` sends the 16-bit Medium preset to the Low-precision filter (-3 dB at 0.824 of the output Nyquist), whereas `NewEngine` Medium is flat to 0.94. The documented 90% Medium passband above is therefore not what `New` delivers on any ratio that needs a filter. This mapping is tracked in issue #76.
+- **Ratio limit.** The pre-stage filter grows about linearly with the input/output ratio and is capped at 8191 taps, so the stopband is only guaranteed up to the ratio that cap supports. Measured (`NewEngine`, float64): High meets its 126 dB stopband at 11.0:1 (352.8kHz → 32kHz, -134.6 dB) and 17.4:1 (384kHz → 22.05kHz, -131.5 dB), but only reaches -42.4 dB at 34.8:1 (384kHz → 11.025kHz); Medium reaches -109.3 dB at 11.0:1 and -109.5 dB at 17.4:1, and -55.8 dB at 34.8:1. Ratios between 17.4:1 and 34.8:1 were not measured. `New` never hands the engine more than 2:1, so this applies to `NewEngine*`, the one-shot helpers and the CLI. Integer decimation hits the same cap (384kHz → 8kHz, 48:1, High: -89.9 dB measured). Cascading 2:1 stages to lift the limit is a planned follow-up.
+- **`QualityQuick`** does not anti-alias when downsampling: it is a cubic interpolator only, like libsoxr's QQ (measured: tones at 1.01 to 1.3 times the output Nyquist fold back at -1.5 to -3.7 dB for 384kHz → 256kHz).
 
 ### Custom Quality Settings
 
@@ -422,8 +441,9 @@ Input -> [DFT Pre-Stage] -> [Polyphase FIR] -> Output
               (2x)            (fine ratio)
 ```
 
-- **Integer ratios** (2x, 3x, etc.): Single DFT stage for efficiency
-- **Non-integer ratios** (44.1kHz→48kHz): DFT pre-upsampling + polyphase stage
+- **Integer upsampling** (2x, 3x, etc.): Single DFT stage for efficiency
+- **Integer downsampling** (96kHz→48kHz): DFT decimation stage with its lowpass at the output Nyquist
+- **Non-integer ratios** (44.1kHz→48kHz): 2x DFT pre-stage + polyphase stage. When upsampling the pre-stage is the anti-imaging filter; when downsampling it is the anti-alias lowpass at the output Nyquist and the polyphase stage only interpolates
 - **Polyphase decomposition**: Reduces computation by processing only needed output phases
 - **Cubic coefficient interpolation**: Sub-phase interpolation for excellent high-frequency THD
 - **Kaiser window**: Optimal FIR filter design with configurable stopband attenuation
