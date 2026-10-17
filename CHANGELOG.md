@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-17
+
 ### Fixed
 
 - **Behaviour change: non-integer downsampling now anti-aliases.** Before, a
@@ -71,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     decimation on the engine path (all pinned bit-for-bit by new golden
     checksums captured on amd64 and arm64 hardware before the change), total
     output length for any input length and chunking, and streaming equals
-    one-shot.
+    one-shot ([#80](https://github.com/tphakala/go-audio-resampler/pull/80)).
 
 ## [1.8.0] - 2026-10-17
 
@@ -255,7 +257,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   design, quality presets, multi-channel and streaming support, validated against
   libsoxr.
 
-[Unreleased]: https://github.com/tphakala/go-audio-resampler/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/tphakala/go-audio-resampler/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/tphakala/go-audio-resampler/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/tphakala/go-audio-resampler/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/tphakala/go-audio-resampler/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/tphakala/go-audio-resampler/compare/v1.5.0...v1.6.0
