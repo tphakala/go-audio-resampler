@@ -33,8 +33,9 @@ type Resampler interface {
 
 	// GetLatency returns the startup deficit in output samples: how many
 	// samples early Process calls withhold while internal filters prime.
-	// Real-time users can prime an output FIFO with this many samples of
-	// silence.
+	// It equals the filters' group delay; output is time-aligned
+	// (output sample n corresponds to input time n/ratio). Real-time users
+	// can prime an output FIFO with this many samples of silence.
 	GetLatency() int
 
 	// Reset clears all internal state and buffers.

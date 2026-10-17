@@ -12,15 +12,15 @@ import (
 // callers can prime a fixed-size output FIFO) against a deficit measured
 // independently of that accessor.
 //
-// The DFT pre-stage does valid-mode convolution (see processZeroCopy): it
-// never zero-pads history, so it withholds output entirely (returns an
-// empty slice) until enough real input has accumulated, rather than
-// emitting spurious zero-valued samples. That means a single one-shot
-// Process() call over a large chunk returns fewer output samples than an
-// ideal, delay-free resampler would (n*ratio): the shortfall is exactly the
-// output the filter is withholding while its delay lines prime, which
-// Flush() would later release. That shortfall is this test's independent
-// measurement of the startup deficit.
+// The FIR stages do valid-mode convolution (see processZeroCopy) over a
+// history that starts with half a window of zeros (the alignment prefill), so
+// they withhold output (returning an empty slice) until the other half of the
+// window has real input, rather than emitting spurious zero-valued samples.
+// That means a single one-shot Process() call over a large chunk returns
+// fewer output samples than an ideal, delay-free resampler would (n*ratio):
+// the shortfall is the filters' group delay, which Flush() later releases.
+// That shortfall is this test's independent measurement of the startup
+// deficit.
 func TestLatencyReporting(t *testing.T) {
 	r, err := NewResampler[float64](44100, 48000, QualityHigh)
 	if err != nil {

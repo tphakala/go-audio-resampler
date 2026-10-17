@@ -740,3 +740,65 @@ func TestNewPath_ProcessInto_MatchesProcess(t *testing.T) {
 		}
 	}
 }
+
+// TestEstimateOutput_BoundsEveryCall checks that EstimateOutput(len(chunk))
+// is an upper bound on the output of every single call, including the first
+// calls of a stream where the filter prefill is released, for the engine and
+// New paths. ProcessInto is fed a buffer of exactly EstimateOutput samples,
+// so an underestimate panics there.
+func TestEstimateOutput_BoundsEveryCall(t *testing.T) {
+	ratios := [][2]float64{
+		{8000, 48000}, {48000, 24000}, {44100, 48000}, {48000, 44100},
+		{22050, 48000}, {25600, 100}, {100, 25600}, {48000, 48000},
+	}
+	presets := []QualityPreset{QualityQuick, QualityLow, QualityMedium, QualityHigh, QualityVeryHigh}
+	rng := rand.New(rand.NewSource(7))
+	sizes := make([]int, 0, 7)
+	sizes = append(sizes, 1, 2, 3, 61)
+	for range 3 {
+		sizes = append(sizes, 1+rng.Intn(3000))
+	}
+	if testing.Short() {
+		sizes = sizes[:4]
+		presets = presets[:4]
+	}
+
+	for _, rr := range ratios {
+		for _, q := range presets {
+			label := fmt.Sprintf("%g->%g q%d", rr[0], rr[1], q)
+			for _, size := range sizes {
+				// Enough input to pass the startup deficit, little enough
+				// to keep the matrix fast.
+				total := min(max(4*size, 2000), 12000)
+				in := makeDeterministicInput(rng, total, rr[0])
+
+				eng, err := NewEngine(rr[0], rr[1], q)
+				require.NoError(t, err, label)
+				cfgR, err := New(newConfig(rr[0], rr[1], q, 1, false))
+				require.NoError(t, err, label)
+				cfgEst, ok := cfgR.(processIntoResampler)
+				require.True(t, ok, label)
+				eng2, err := NewEngine(rr[0], rr[1], q)
+				require.NoError(t, err, label)
+
+				for pos := 0; pos < len(in); pos += size {
+					chunk := in[pos:min(pos+size, len(in))]
+
+					out, err := eng.Process(chunk)
+					require.NoError(t, err, label)
+					require.LessOrEqual(t, len(out), eng.EstimateOutput(len(chunk)),
+						"%s engine size=%d pos=%d", label, size, pos)
+
+					out, err = cfgR.Process(chunk)
+					require.NoError(t, err, label)
+					require.LessOrEqual(t, len(out), cfgEst.EstimateOutput(len(chunk)),
+						"%s New size=%d pos=%d", label, size, pos)
+
+					buf := make([]float64, eng2.EstimateOutput(len(chunk)))
+					_, err = eng2.ProcessInto(chunk, buf)
+					require.NoError(t, err, label)
+				}
+			}
+		}
+	}
+}

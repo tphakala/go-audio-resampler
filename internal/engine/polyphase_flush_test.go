@@ -11,17 +11,17 @@ import (
 // TestPolyphaseStageFlush_CanonicalLength is a regression test for the bug where
 // PolyphaseStage.Flush() padded the stream with tapsPerPhase*historyBufferMultiplier
 // (2x) zeros. historyBufferMultiplier is a buffer pre-allocation constant, not a
-// flush-padding amount. tapsPerPhase zeros is enough to drain the polyphase delay
-// line (matching the sibling DFTStage.Flush, which pads tapsPerPhase). The extra
-// tapsPerPhase zeros only produced additional all-zero output windows, making the
-// total output length longer than canonical (e.g. +44/+57 samples) without
-// dropping any real samples.
+// flush-padding amount. The stage pads tapsPerPhase-prefill zeros (the rest of
+// the last real sample's window, since the delay line starts with prefill
+// zeros) and truncates the output to the count the stream owes. Padding more
+// only produced additional all-zero output windows, making the total output
+// length longer than canonical (e.g. +44/+57 samples) without dropping any
+// real samples.
 //
 // This asserts the total output length (Process + Flush) lands within a tight
 // margin of the ideal resampled length. The 2x padding overshoots that margin;
-// the correct tapsPerPhase padding lands within it. It also asserts the flush
-// fully drains the delay line (the final sample is silence), which catches the
-// opposite error of padding too few zeros and dropping real tail samples.
+// the correct padding lands within it. The lower bound catches the opposite
+// error of padding too few zeros and dropping real tail samples.
 func TestPolyphaseStageFlush_CanonicalLength(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -57,8 +57,8 @@ func TestPolyphaseStageFlush_CanonicalLength(t *testing.T) {
 			total := len(proc) + len(flush)
 			ideal := int(math.Round(float64(n) * c.ratio))
 
-			// A correctly flushed polyphase stage emits ~ideal samples; padding
-			// tapsPerPhase zeros leaves only a sub-sample rounding tail. The 2x
+			// A correctly flushed polyphase stage emits ~ideal samples; the
+			// aligned padding leaves only a sub-sample rounding tail. The 2x
 			// padding overshoots by ~tapsPerPhase*ratio (43-57 samples here). The
 			// lower bound guards against the opposite regression: under-padding
 			// would drop real tail samples and come up short.
@@ -86,12 +86,13 @@ func TestPolyphaseStageFlush_CanonicalLength(t *testing.T) {
 	}
 }
 
-// TestPolyphaseStageFlush_EmptyHistoryReturnsNothing verifies that flushing a
+// TestPolyphaseStageFlush_NeverFedReturnsNothing verifies that flushing a
 // stage that was never fed any input returns no samples, matching the sibling
-// DFTStage.Flush (which guards len(history)==0). Without the guard, Flush pads
-// tapsPerPhase zeros through the empty delay line and emits a phantom window of
-// zero-valued output samples for a stage that produced nothing.
-func TestPolyphaseStageFlush_EmptyHistoryReturnsNothing(t *testing.T) {
+// DFTStage.Flush (both guard on a fed flag, since the history starts
+// prefilled and is never empty). Without the guard, Flush would pad zeros
+// through the stage and could emit a phantom window of zero-valued output
+// samples for a stage that produced nothing.
+func TestPolyphaseStageFlush_NeverFedReturnsNothing(t *testing.T) {
 	for _, ratio := range []float64{2.0 / 3.0, 48000.0 / 44100.0} {
 		st, err := NewPolyphaseStage[float64](ratio, ratio, false, QualityHigh)
 		if err != nil {

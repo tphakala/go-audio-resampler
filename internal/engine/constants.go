@@ -14,3 +14,14 @@ const (
 	// Memory usage estimate for cubic stage (bytes)
 	cubicMemoryUsage = 64
 )
+
+// linearPhaseDelayDivisor halves the span of a symmetric (linear-phase) FIR:
+// its group delay is (taps-1)/2 samples.
+const linearPhaseDelayDivisor = 2
+
+// groupDelaySamples returns the group delay of a linear-phase FIR with the
+// given number of taps, in whole samples. An even tap count has a half-sample
+// delay, which is rounded down.
+func groupDelaySamples(taps int) int {
+	return (taps - 1) / linearPhaseDelayDivisor
+}

@@ -206,8 +206,11 @@ func (r *SimpleResampler) GetStatistics() map[string]int64 {
 
 // Latency returns the resampler's startup deficit in output samples: the
 // number of samples early Process calls withhold while the internal filter
-// primes. Real-time users feeding fixed-size output buffers should prime
-// their FIFO with this many samples of silence.
+// primes. It equals the filters' group delay, and output is time-aligned
+// (output sample n corresponds to input time n/ratio), so priming a FIFO with
+// this many samples of silence delays the delivered stream by exactly that
+// many samples. Real-time users feeding fixed-size output buffers should
+// prime their FIFO with this many samples of silence.
 func (r *SimpleResampler) Latency() int {
 	return r.engine.Latency()
 }
@@ -458,8 +461,11 @@ func (r *SimpleResamplerFloat32) GetStatistics() map[string]int64 {
 
 // Latency returns the resampler's startup deficit in output samples: the
 // number of samples early Process calls withhold while the internal filter
-// primes. Real-time users feeding fixed-size output buffers should prime
-// their FIFO with this many samples of silence.
+// primes. It equals the filters' group delay, and output is time-aligned
+// (output sample n corresponds to input time n/ratio), so priming a FIFO with
+// this many samples of silence delays the delivered stream by exactly that
+// many samples. Real-time users feeding fixed-size output buffers should
+// prime their FIFO with this many samples of silence.
 func (r *SimpleResamplerFloat32) Latency() int {
 	return r.engine.Latency()
 }

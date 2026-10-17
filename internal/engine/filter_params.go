@@ -200,6 +200,7 @@ func qualityToPassbandEnd(q Quality) float64 {
 
 // polyphaseFilter holds filter coefficients for polyphase resampling.
 type polyphaseFilter struct {
+	protoLen     int
 	coeffs       []float64
 	numPhases    int
 	tapsPerPhase int
@@ -279,6 +280,7 @@ func designPolyphaseFilter(numPhases int, ratio, totalIORatio float64, hasPreSta
 	}
 
 	return &polyphaseFilter{
+		protoLen:     len(prototype),
 		coeffs:       coeffs,
 		numPhases:    numPhases,
 		tapsPerPhase: params.TapsPerPhase,
