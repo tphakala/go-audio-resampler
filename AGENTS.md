@@ -6,16 +6,16 @@ Orientation for coding agents and automated reviewers working on this repository
 
 `github.com/tphakala/go-audio-resampler` (package `resampler`; the README imports it under the alias `resampling`) is a pure-Go, high-quality audio sample rate converter. It is a reimplementation of the multi-stage design of libsoxr (the SoX Resampler library, by Rob Sykes): a DFT pre-stage plus a polyphase FIR stage with Kaiser-window filters and cubic coefficient interpolation. It aims to:
 
-1. **Build anywhere Go builds.** No cgo, no C toolchain. SIMD comes from `github.com/tphakala/simd` plus assembly kernels in `internal/simdops`, each with a pure-Go fallback. The CLI tools alone use `go-audio/wav` and `go-audio/audio`.
-2. **Match libsoxr quality.** The presets reproduce libsoxr's recipes (`QualityHigh` is libsoxr HQ, `QualityVeryHigh` is VHQ). THD, SNR and aliasing are measured against libsoxr reference data, and the README quality tables are backed by committed tests.
+1. **Build anywhere Go builds.** No cgo, no C toolchain. SIMD comes from `github.com/tphakala/simd` plus assembly kernels in `internal/simdops`, each with a pure-Go fallback. Only `cmd/resample-wav` uses `go-audio/wav` and `go-audio/audio`.
+2. **Match libsoxr quality.** At engine level `engine.QualityHigh` is libsoxr HQ and `engine.QualityVeryHigh` is VHQ, and the quality tests exercise those. The root presets reach them differently: `NewEngine*` maps both High and VeryHigh to `engine.QualityHigh`, and `New` maps High and VeryHigh through precision 24 and 32 bits to `Quality24Bit` and `Quality32Bit` (`convenience.go`, `stages.go`); `doc.go` and the README table still say 20-bit and 28-bit. Keep those in line with whatever mapping is intended. THD, SNR and aliasing are measured against libsoxr reference data, and the README quality tables are backed by committed tests.
 3. **Be safe for streaming and real-time use.** Chunked `Process` calls plus one `Flush` give the same audio as a one-shot resample, with documented latency, an allocation-free `ProcessInto` path, and per-channel state so channels can run in parallel.
 
 Packages:
 
 | Package | Role |
 |---|---|
-| `resampler` (root) | Public API: `Config`, `QualitySpec`, presets, `New`, `Resampler`, `MultiFlusher`, `SimpleResampler` and `SimpleResamplerFloat32`, `ResampleMono[Float32]`, `ResampleStereo[Float32]`, convenience constructors, interleave helpers, `GetInfo` |
-| `internal/engine` | The resampling algorithms: DFT, half-band, polyphase and cubic stages, the single-ratio `Resampler`, filter parameters, stage adapter |
+| `resampler` (root) | Public API: `Config`, `QualitySpec`, presets, `New`, `Resampler`, `MultiFlusher`, `SimpleResampler` and `SimpleResamplerFloat32`, `ResampleMono[Float32]`, `ResampleStereo[Float32]`, convenience constructors, interleave helpers, `GetInfo`, `NewEngine`/`NewEngineFloat32`, `GetPresetSpec`, and the pipeline types `Pipeline`, `StageSpec`, `Stage`, `RingBuffer` |
+| `internal/engine` | The resampling algorithms: DFT stage (with a half-band fast path), polyphase and cubic stages, the single-ratio `Resampler`, filter parameters, stage adapter |
 | `internal/pipeline` | Stage interface and the multi-stage pipeline, buffers, zero-copy processing |
 | `internal/filter` | Kaiser-window low-pass filter design |
 | `internal/mathutil` | Bessel I0, Kaiser beta, filter length estimation, shared constants |
@@ -46,7 +46,7 @@ A change that violates one of these is wrong even if tests pass.
 7. **`ProcessInto` does not advance state on failure.** When the output buffer is too small it returns `ErrBufferTooSmall` before touching any state, so the caller can retry with a larger buffer. `EstimateOutput` is a conservative upper bound. The warm `ProcessInto` path allocates nothing; do not add allocations to it.
 8. **One channel, one instance, independent state.** `SimpleResampler` and `SimpleResamplerFloat32` handle one channel. Multi-channel state is per channel, which is what makes `EnableParallel` safe. `Process` and `Flush` on one instance must be serialized by the caller; nothing may share mutable state across channels or instances.
 9. **Validate inputs at the door.** `Config.Validate` and the constructors reject NaN, non-positive and out-of-range rates and channel counts (up to 256 channels) with an error rather than a panic or a hang (`nan_validation_test.go`). Parameters reaching `internal/` code are already validated; keep it that way.
-10. **float32 and float64 paths stay consistent.** The float32 path is native (`Process` and `Flush` both return `[]float32`), not a conversion wrapper. A behaviour fix in one precision path is made in the other, or the reason it does not apply is stated.
+10. **float32 and float64 paths stay consistent.** `SimpleResamplerFloat32` is float32-native (`Process` and `Flush` return `[]float32`). The `Resampler` from `New` runs float64 internally and `ProcessFloat32` is a conversion wrapper. A behaviour fix in one precision path is made in the other, or the reason it does not apply is stated.
 11. **Attribution and licence.** The code is LGPL-2.1-or-later and derives from libsoxr. Go files carry the SPDX header. Keep the attribution section of `doc.go` accurate when new libsoxr-derived components are added.
 
 ## Layout
@@ -57,7 +57,8 @@ resample.go          Config, QualitySpec, QualityPreset, New, Resampler, MultiFl
 convenience.go       SimpleResampler[Float32], ProcessInto, one-shot helpers, constructors, interleave helpers
 pipeline_builder.go  Stage selection and pipeline assembly for the root API
 stages.go            Stage constructors that bridge to internal/engine
-constant.go, constants.go   Shared constants
+constant.go    the constantRateResampler returned by New (per-channel stages, parallel path)
+constants.go   Shared constants
 
 internal/engine/     resampler.go, dft_stage.go, polyphase.go, polyphase_stage.go, cubic.go, filter_params.go, stage_adapter.go
 internal/pipeline/   pipeline.go, buffer.go
@@ -92,9 +93,9 @@ task test          # go test ./...
 task test:verbose  # go test -v ./...
 task test:race     # go test -race ./...
 task test:coverage # coverage profile and HTML report
-task test:soxr     # soxr comparison tests (builds the C reference, needs libsoxr)
+task test:soxr     # intended: soxr comparison tests; currently points at ./pkg/engine, which does not exist (the engine is internal/engine)
 task bench         # all benchmarks with allocation counts
-task bench:engine  # engine benchmarks only
+task bench:engine  # intended: engine benchmarks only; same stale ./pkg/engine path as test:soxr (also bench:profile and bench:compare)
 task lint          # golangci-lint run ./...
 task fmt           # go fmt ./...
 task vet           # go vet ./...
@@ -109,7 +110,7 @@ Run `task check` before pushing. CI runs: lint; tests on Linux, macOS and Window
 
 - **Lint.** Config is `.golangci.yaml`: a long explicit list of linters (gocognit at 50, `mnd`, `exhaustive`, `testifylint`, `godoclint`, `modernize`, among others), with gocritic running the ruleguard matchers in `rules/`.
 - **No `//nolint` without a linter name and a reason** (`nolintlint` is on). If a linter is wrong often enough to silence globally, change `.golangci.yaml` with a comment saying why.
-- **Magic numbers** go in the constants files (`constant.go`, `constants.go`, `internal/*/constants.go`) with a comment on where the value comes from (libsoxr recipe, measurement).
+- **Magic numbers** go in the constants files (`constants.go`, `internal/*/constants.go`) with a comment on where the value comes from (libsoxr recipe, measurement).
 - **Tests** are table-driven with `testify` where that reads well; helpers call `t.Helper()`.
 - **Comments.** Explain why: the libsoxr behaviour being matched, the failure being avoided, the measurement behind a constant. Match the existing density.
 - **Docs follow code.** A behaviour change updates `doc.go`, the README and the relevant godoc in the same change. A sentence that is false for some path (float32 versus float64, mono versus multi-channel) is a defect.
@@ -138,7 +139,7 @@ Intentional, do not flag:
 - Startup latency (the first `Process` calls returning fewer samples than expected); it is documented and exposed through `Latency()`.
 - The package being named `resampler` while the README imports it as `resampling`.
 - `internal/` packages exporting more than they need; they are not API.
-- The C and Python material in `test-reference`, and the CLI-only WAV dependencies.
+- The C and Python material in `test-reference`, and the `cmd/resample-wav` WAV dependencies.
 - Tests that skip when libsoxr reference data is unavailable.
 
 ## Things that do not belong in the repo
