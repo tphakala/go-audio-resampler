@@ -180,3 +180,25 @@ func TestPassbandEdge_NonIntegerDownsampling_MatchesDecimationPath(t *testing.T)
 		})
 	}
 }
+
+// TestAntiAliasing_NonIntegerDownsampling_RatioLimit pins the ratio limit the
+// README, doc.go and CHANGELOG quote: the pre-stage filter is capped at 8191
+// taps, and the measured stopband holds up to 17.4:1 for High and Medium. The
+// shortfall beyond the cap (34.8:1) is documented but deliberately not
+// asserted, so cascading 2:1 stages can lift it without touching this test.
+func TestAntiAliasing_NonIntegerDownsampling_RatioLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("large-ratio filters are long; skipped in -short mode")
+	}
+	for _, rr := range [][2]float64{{352800, 32000}, {384000, 22050}} {
+		for _, q := range []Quality{QualityMedium, QualityHigh} {
+			t.Run(fmt.Sprintf("%v/%g_to_%g", q, rr[0], rr[1]), func(t *testing.T) {
+				t.Parallel()
+				worst := aaWorstAlias(t, rr[0], rr[1], q)
+				if want := -qualityToAttenuation(q); worst > want {
+					t.Errorf("alias level %.1f dB at %.1f:1, want <= %.1f dB", worst, rr[0]/rr[1], want)
+				}
+			})
+		}
+	}
+}
