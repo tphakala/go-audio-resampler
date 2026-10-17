@@ -264,13 +264,15 @@ func TestQuickAndUnity_BitIdenticalToMaster(t *testing.T) {
 		t.Skipf("no checksum golden for %s", runtime.GOARCH)
 	}
 	// From GOAMD64=v3 the compiler fuses multiply-adds on amd64 as it does on
-	// arm64, so the cubic stage's bits differ from the amd64 golden.
-	if runtime.GOARCH == "amd64" && goamd64Fuses() {
-		t.Skip("checksums were captured without fused multiply-add (GOAMD64=v1)")
-	}
+	// arm64, so the cubic stage's bits differ from the amd64 golden. Unity
+	// rows do not run the cubic stage and stay checked.
+	fused := runtime.GOARCH == "amd64" && goamd64Fuses()
 	golden := loadGolden(t)
 	in := goldenSignal(goldenSumSize)
 	for _, row := range goldenSumRows() {
+		if fused && row.q == QualityQuick && row.in != row.out {
+			continue
+		}
 		for _, path := range goldenPaths {
 			key := goldenKey(kind, path, row.in, row.out, row.q, goldenSumSize)
 			want, has := golden[key]
