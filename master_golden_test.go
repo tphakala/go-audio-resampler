@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -234,6 +235,21 @@ func goldenSumRows() (rows []struct {
 	return rows
 }
 
+// goamd64Fuses reports whether this binary was built with GOAMD64=v3 or v4,
+// the levels at which the Go compiler emits fused multiply-add on amd64.
+func goamd64Fuses() bool {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return false
+	}
+	for _, s := range info.Settings {
+		if s.Key == "GOAMD64" {
+			return s.Value == "v3" || s.Value == "v4"
+		}
+	}
+	return false
+}
+
 // TestQuickAndUnity_BitIdenticalToMaster pins the output bits of the
 // QualityQuick (cubic) preset and of unity conversions at every preset.
 // Both were already time-aligned, so aligning the FIR stages must not touch
@@ -246,6 +262,11 @@ func TestQuickAndUnity_BitIdenticalToMaster(t *testing.T) {
 		kind = "sum-arm64"
 	default:
 		t.Skipf("no checksum golden for %s", runtime.GOARCH)
+	}
+	// From GOAMD64=v3 the compiler fuses multiply-adds on amd64 as it does on
+	// arm64, so the cubic stage's bits differ from the amd64 golden.
+	if runtime.GOARCH == "amd64" && goamd64Fuses() {
+		t.Skip("checksums were captured without fused multiply-add (GOAMD64=v1)")
 	}
 	golden := loadGolden(t)
 	in := goldenSignal(goldenSumSize)
