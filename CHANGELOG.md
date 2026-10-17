@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Behaviour change: output is now time-aligned.** For `QualityLow`,
+  `QualityMedium`, `QualityHigh` and `QualityVeryHigh` on every entry point
+  (`NewEngine`, `NewEngineFloat32`, `New`, `ResampleMono` and the other one-shot
+  helpers), output sample `n` now corresponds to input time `n/ratio`, as in
+  libsoxr and `sox rate`. Before, every FIR stage emitted its first sample only
+  once it held a full window of real input, so the signal ran early by one
+  filter group delay: for example 48000 to 24000 `QualityHigh` was 187.5 output
+  samples early. Each FIR stage now starts with a deterministic zero prefill and
+  initial phase for its own group delay, so a unit impulse at input sample `p`
+  peaks at output sample `p*ratio` (within 0.005 input samples), and the first
+  samples of a stream carry the filter's onset ramp. `Latency()` and
+  `GetLatency()` are now the filters' group delay, roughly half their previous
+  value (48000 to 24000 `QualityHigh`: 375 to 188), and still match the measured
+  startup deficit. Total output length is unchanged for any input length and
+  chunking, streaming still equals one-shot bit for bit, `QualityQuick` and unity
+  conversions are bit-identical to before, and `ProcessInto` still allocates
+  nothing once warm. Callers that shifted the output to compensate for the old
+  early signal must stop doing so, and anything that hard-coded a `Latency()`
+  value must read it at run time ([#77](https://github.com/tphakala/go-audio-resampler/pull/77)).
+
 ## [1.7.0] - 2026-08-06
 
 ### Changed

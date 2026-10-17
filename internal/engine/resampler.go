@@ -346,7 +346,10 @@ func (r *Resampler[F]) GetStatistics() map[string]int64 {
 }
 
 // StartupDeficit returns the startup deficit in output samples, un-rounded.
-// It exists so multi-stage pipelines can accumulate each stage's fractional
+// Output is time-aligned (output sample n corresponds to input time n/ratio),
+// so the deficit is exactly the filters' group delay: each FIR stage starts
+// with half a window of implicit zeros and withholds output only until the
+// rest of the window has real input. It exists so multi-stage pipelines can accumulate each stage's fractional
 // deficit and round once at the end, avoiding the per-stage rounding error
 // that accrues when every stage rounds to an integer before summing. Latency
 // wraps this with math.Ceil.
@@ -356,25 +359,31 @@ func (r *Resampler[F]) StartupDeficit() float64 {
 	}
 	deficitIn := 0.0
 	if r.preStage != nil && r.preStage.factor > 1 {
-		deficitIn += float64(r.preStage.tapsPerPhase - 1)
+		deficitIn += float64(r.preStage.groupDelay) / float64(r.preStage.factor)
 	}
-	if r.decimationStage != nil {
-		deficitIn += float64(r.decimationStage.numTaps - 1)
+	if r.decimationStage != nil && r.decimationStage.factor > 1 {
+		deficitIn += float64(r.decimationStage.prefill)
 	}
 	if r.polyphaseStage != nil {
 		intermediateFactor := 1.0
 		if r.preStage != nil && r.preStage.factor > 1 {
 			intermediateFactor = float64(r.preStage.factor)
 		}
-		deficitIn += float64(r.polyphaseStage.tapsPerPhase-1) / intermediateFactor
+		// Group delay of the polyphase prototype in phase units: the whole
+		// samples of the prefill complement plus the initial phase offset.
+		ps := r.polyphaseStage
+		d := float64((ps.tapsPerPhase-1-ps.prefill)*ps.numPhases) + float64(ps.at0>>ps.phaseFracBits)
+		deficitIn += d / float64(ps.numPhases) / intermediateFactor
 	}
 	return deficitIn * r.ratio
 }
 
 // Latency returns the startup deficit in output samples: how many samples
-// the first Process calls withhold while the filter delay lines prime.
-// Real-time consumers should prime their output FIFO with this many samples
-// of silence to keep fixed-size callbacks fed.
+// the first Process calls withhold while the filter delay lines prime. It
+// equals the filters' group delay, and output is time-aligned, so priming a
+// FIFO with this many samples of silence delays the delivered stream by
+// exactly that many samples. Real-time consumers should prime their output
+// FIFO with this many samples of silence to keep fixed-size callbacks fed.
 func (r *Resampler[F]) Latency() int {
 	return int(math.Ceil(r.StartupDeficit()))
 }

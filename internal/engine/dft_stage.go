@@ -44,6 +44,22 @@ type DFTStage[F simdops.Float] struct {
 
 	// SIMD operations for type F
 	ops *simdops.Ops[F]
+
+	// Time alignment. The prototype has odd length N, so its group delay
+	// groupDelay = (N-1)/2 is a whole number of output samples. Output sample
+	// j is aligned with input time j/factor when the delay line starts with
+	// prefill zeros (whole input samples of the delay) and the first skip raw
+	// outputs (the remainder, groupDelay mod factor) are dropped. Without
+	// this the first output would come from a window of real input only and
+	// the whole stream would run groupDelay samples early.
+	groupDelay int // (N-1)/2, in output samples
+	prefill    int // zeros placed in history at construction and Reset
+	skip       int // raw outputs dropped at stream start
+	skipLeft   int // part of skip not yet dropped
+	// fed is set by the first non-empty Process and cleared by Reset. Flush
+	// uses it instead of len(history), which a prefilled history never makes
+	// zero.
+	fed bool
 }
 
 // NewDFTStage creates a DFT upsampling stage.
@@ -132,7 +148,12 @@ func NewDFTStage[F simdops.Float](factor int, quality Quality) (*DFTStage[F], er
 		}
 	}
 
-	return &DFTStage[F]{
+	// The first output window covers tapsPerPhase inputs, so a window that
+	// has seen only prefill zeros plus the first real sample is centred
+	// gd/factor inputs back; prefill makes up the rest of the window.
+	gd := groupDelaySamples(len(coeffs))
+	prefill := tapsPerPhase - 1 - gd/factor
+	st := &DFTStage[F]{
 		factor:          factor,
 		polyCoeffs:      polyCoeffs,
 		tapsPerPhase:    tapsPerPhase,
@@ -142,7 +163,12 @@ func NewDFTStage[F simdops.Float](factor int, quality Quality) (*DFTStage[F], er
 		history:         make([]F, 0, tapsPerPhase*historyBufferMultiplier),
 		phaseBufs:       phaseBufs,
 		ops:             ops,
-	}, nil
+		groupDelay:      gd,
+		prefill:         prefill,
+		skip:            gd % factor,
+	}
+	st.Reset()
+	return st, nil
 }
 
 // processZeroCopy upsamples the input using polyphase FIR filtering.
@@ -162,6 +188,7 @@ func (s *DFTStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:unparam
 	if len(input) == 0 {
 		return []F{}, nil
 	}
+	s.fed = true
 
 	// Append input to history (no zero-insertion needed!).
 	// appendStable grows with headroom so steady-state streaming does not
@@ -203,6 +230,11 @@ func (s *DFTStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:unparam
 		s.history = s.history[:numAvailable-numInputProcessable]
 	}
 
+	if s.skipLeft > 0 {
+		d := min(s.skipLeft, numOutput)
+		s.skipLeft -= d
+		return s.outputBuf[d:numOutput], nil
+	}
 	return s.outputBuf[:numOutput], nil
 }
 
@@ -335,30 +367,44 @@ func (s *DFTStage[F]) processChunked(history, output []F, numInputProcessable, f
 }
 
 // Flush returns any remaining buffered samples.
+//
+// A stage that was never fed has nothing to drain: padding zeros through a
+// stage with no real input would emit a phantom window of zeros. The guard is
+// the fed flag, not len(history), because the history starts prefilled.
 func (s *DFTStage[F]) Flush() ([]F, error) {
-	if s.factor == 1 || len(s.history) == 0 {
+	if s.factor == 1 || !s.fed {
 		return []F{}, nil
 	}
 
-	// Process retains exactly tapsPerPhase-1 history samples, so that many
-	// padding zeros advance the delay line past the last real sample without
-	// producing an extra all-zero output window.
-	zeros := make([]F, s.tapsPerPhase-1)
+	// The stream owes factor outputs per real input sample, in total: the
+	// samples still pending in history, plus the raw outputs the start-up
+	// skip has dropped so far. Padding T-prefill zeros makes every real
+	// sample the centre of a complete window; the pad also yields up to
+	// factor-1 surplus outputs (skip < factor), which are truncated so the
+	// total length is exactly factor times the input length.
+	owed := (len(s.history)-s.prefill)*s.factor + s.skip - s.skipLeft
+	zeros := make([]F, s.tapsPerPhase-s.prefill)
 	out, err := s.Process(zeros)
+	if err == nil && len(out) > owed {
+		out = out[:owed]
+	}
 	// Flush is terminal: after draining, return the stage to its fresh state.
-	// Otherwise the tapsPerPhase-1 padding zeros stay in the delay line, so the
-	// len(history)==0 guard never fires again: a second Flush keeps emitting
-	// all-zero windows and a post-flush Process convolves new audio against
-	// leftover zeros instead of starting a clean stream. Reset() is
-	// the authoritative fresh-state definition; calling it keeps Flush aligned
-	// with it automatically.
+	// Otherwise the padding zeros stay in the delay line, so a second Flush
+	// would emit more windows and a post-flush Process would convolve new
+	// audio against leftover zeros instead of starting a clean stream.
+	// Reset() is the authoritative fresh-state definition (it re-establishes
+	// the prefill); calling it keeps Flush aligned with it automatically.
 	s.Reset()
 	return out, err
 }
 
-// Reset clears internal state.
+// Reset returns the stage to its just-constructed state: history holds the
+// alignment prefill and the start-up skip is pending again.
 func (s *DFTStage[F]) Reset() {
-	s.history = s.history[:0]
+	s.history = s.history[:s.prefill]
+	clear(s.history)
+	s.skipLeft = s.skip
+	s.fed = false
 }
 
 // =============================================================================
@@ -393,6 +439,15 @@ type DFTDecimationStage[F simdops.Float] struct {
 
 	// SIMD operations for type F
 	ops *simdops.Ops[F]
+
+	// Time alignment. numTaps is odd, so the group delay (numTaps-1)/2 is a
+	// whole number of input samples. Starting the delay line with that many
+	// zeros makes output o the filter response centred on input sample
+	// o*factor, instead of letting the stream run that far early.
+	prefill int
+	// fed is set by the first non-empty Process and cleared by Reset; Flush
+	// uses it because the prefilled history is never empty.
+	fed bool
 }
 
 // NewDFTDecimationStage creates a DFT decimation stage for integer ratio downsampling.
@@ -472,14 +527,17 @@ func NewDFTDecimationStage[F simdops.Float](factor int, quality Quality) (*DFTDe
 		reversedCoeffs[numTaps-1-i] = F(c)
 	}
 
-	return &DFTDecimationStage[F]{
+	st := &DFTDecimationStage[F]{
 		factor:     factor,
 		coeffs:     reversedCoeffs,
 		numTaps:    numTaps,
 		history:    make([]F, 0, numTaps*historyBufferMultiplier),
 		decimPhase: 0,
 		ops:        ops,
-	}, nil
+		prefill:    groupDelaySamples(numTaps),
+	}
+	st.Reset()
+	return st, nil
 }
 
 // Process filters and decimates the input samples.
@@ -502,6 +560,7 @@ func (s *DFTDecimationStage[F]) processZeroCopy(input []F) ([]F, error) { //noli
 	if len(input) == 0 {
 		return []F{}, nil
 	}
+	s.fed = true
 
 	// Append input to history (stable growth avoids steady-state realloc on input jitter)
 	s.history = appendStable(s.history, input)
@@ -580,28 +639,32 @@ func (s *DFTDecimationStage[F]) Process(input []F) ([]F, error) {
 
 // Flush returns any remaining buffered samples.
 func (s *DFTDecimationStage[F]) Flush() ([]F, error) {
-	if s.factor == 1 || len(s.history) == 0 {
+	if s.factor == 1 || !s.fed {
 		return []F{}, nil
 	}
 
-	// Process retains exactly numTaps-1 history samples, so that many padding
-	// zeros advance the delay line past the last real sample without producing
-	// an extra all-zero output window.
-	zeros := make([]F, s.numTaps-1)
+	// Output o is centred on input sample o*factor, so the last real sample
+	// needs prefill (the group delay) zeros after it to complete its window.
+	// That yields ceil(n/factor) outputs in total with no truncation: the
+	// first output after the pad would need a window centred past the end of
+	// the stream.
+	zeros := make([]F, s.numTaps-1-s.prefill)
 	out, err := s.Process(zeros)
 	// Flush is terminal: after draining, return the stage to its fresh state.
-	// Otherwise the numTaps-1 padding zeros stay in the delay line, so the
-	// len(history)==0 guard never fires again: a second Flush keeps emitting
-	// all-zero windows and a post-flush Process convolves new audio against
-	// leftover zeros instead of starting a clean stream. Reset() is
-	// the authoritative fresh-state definition (history and decimPhase); calling
-	// it keeps Flush aligned with it automatically.
+	// Otherwise the padding zeros stay in the delay line, so a second Flush
+	// would emit more windows and a post-flush Process would convolve new
+	// audio against leftover zeros instead of starting a clean stream.
+	// Reset() is the authoritative fresh-state definition (prefilled history,
+	// decimPhase, fed); calling it keeps Flush aligned with it automatically.
 	s.Reset()
 	return out, err
 }
 
-// Reset clears internal state.
+// Reset returns the stage to its just-constructed state: history holds the
+// alignment prefill and decimation restarts at the first sample.
 func (s *DFTDecimationStage[F]) Reset() {
-	s.history = s.history[:0]
+	s.history = s.history[:s.prefill]
+	clear(s.history)
 	s.decimPhase = 0
+	s.fed = false
 }

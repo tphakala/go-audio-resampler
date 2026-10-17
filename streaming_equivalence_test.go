@@ -179,3 +179,93 @@ func assertStreamingEquivalentFloat32(t *testing.T, name string, in, out float64
 		}
 	}
 }
+
+// streamProcessor is the Process/Flush surface shared by the engine and
+// New(config) resamplers.
+type streamProcessor interface {
+	Process(input []float64) ([]float64, error)
+	Flush() ([]float64, error)
+}
+
+// TestStreamingEquivalence_RandomChunkPlans feeds seeded random chunk plans
+// (sizes 1..2000, so single-sample, sub-window and multi-window calls all
+// occur) and requires output bit-identical to one-shot processing. The rows
+// cover single-stage DFT, decimation, and multi-stage chains, whose
+// prefill and skip state must not depend on how the input is cut.
+func TestStreamingEquivalence_RandomChunkPlans(t *testing.T) {
+	rows := []struct {
+		in, out float64
+	}{
+		{8000, 48000},
+		{16000, 48000},
+		{48000, 24000},
+		{384000, 256000},
+		{44100, 48000},
+		{48000, 44100},
+	}
+	const plansPerRow = 20
+	for _, rr := range rows {
+		n := int(rr.in / 4)
+		input := make([]float64, n)
+		for i := range input {
+			input[i] = 0.5 * math.Sin(2*math.Pi*997*float64(i)/rr.in)
+		}
+		for _, q := range []QualityPreset{QualityLow, QualityHigh, QualityVeryHigh} {
+			ref, err := runEngine64(input, rr.in, rr.out, q, 0)
+			if err != nil {
+				t.Fatalf("%g->%g q%d: one-shot: %v", rr.in, rr.out, q, err)
+			}
+			refNew, err := runNewMono(input, rr.in, rr.out, q, 0)
+			if err != nil {
+				t.Fatalf("%g->%g q%d: New one-shot: %v", rr.in, rr.out, q, err)
+			}
+			for plan := range plansPerRow {
+				rng := rand.New(rand.NewSource(int64(1000*plan) + int64(q)))
+				for _, name := range []string{"engine", "New"} {
+					want := ref
+					if name == "New" {
+						want = refNew
+					}
+					assertRandomPlanEqualsOneShot(t, name, rr.in, rr.out, q, plan, rng, input, want)
+				}
+			}
+		}
+	}
+}
+
+// assertRandomPlanEqualsOneShot streams input through a fresh engine or
+// New(config) resampler in random chunk sizes drawn from rng, flushes once,
+// and requires the result to equal want bit for bit.
+func assertRandomPlanEqualsOneShot(t *testing.T, name string, in, out float64, q QualityPreset, plan int, rng *rand.Rand, input, want []float64) {
+	t.Helper()
+
+	var r streamProcessor
+	var err error
+	if name == "engine" {
+		r, err = NewEngine(in, out, q)
+	} else {
+		r, err = New(newConfig(in, out, q, 1, false))
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []float64
+	for pos := 0; pos < len(input); {
+		size := min(1+rng.Intn(2000), len(input)-pos)
+		o, err := r.Process(slices.Clone(input[pos : pos+size]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, o...)
+		pos += size
+	}
+	tail, err := r.Flush()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = append(got, tail...)
+	if !slices.Equal(got, want) {
+		t.Fatalf("%s %g->%g q%d plan %d: chunked output differs from one-shot (len %d vs %d)",
+			name, in, out, q, plan, len(got), len(want))
+	}
+}

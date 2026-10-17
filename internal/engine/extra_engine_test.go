@@ -80,9 +80,10 @@ func TestResamplerLargeInputs_DFTChunked(t *testing.T) {
 
 	out64, err := r64.Process(largeInput64)
 	require.NoError(t, err)
-	// 5000 input samples - 166 tapsPerPhase + 1 = 4835 processable frames
-	// 4835 * 2 upsampling factor = 9670 output samples
-	assert.Len(t, out64, 9670)
+	// The stage is time-aligned, so the first call withholds only the filter's
+	// group delay (331 taps: (331-1)/2 = 165 output samples): 5000 inputs * 2
+	// upsampling factor - 165 = 9835 output samples
+	assert.Len(t, out64, 9835)
 
 	// Float32 upsampling to trigger DFTStage chunked path
 	r32, err := NewResampler[float32](22050, 44100, QualityHigh)
@@ -95,7 +96,7 @@ func TestResamplerLargeInputs_DFTChunked(t *testing.T) {
 
 	out32, err := r32.Process(largeInput32)
 	require.NoError(t, err)
-	assert.Len(t, out32, 9670)
+	assert.Len(t, out32, 9835)
 
 	// DFT Decimation stage large input
 	rDecim, err := NewResampler[float64](44100, 22050, QualityHigh)
@@ -103,6 +104,8 @@ func TestResamplerLargeInputs_DFTChunked(t *testing.T) {
 
 	outDecim, err := rDecim.Process(largeInput64)
 	require.NoError(t, err)
-	// (5000 input - 750 tapsPerPhase + 1) / 2 = 2125 output samples
-	assert.Len(t, outDecim, 2125)
+	// Aligned decimation prefills (751-1)/2 = 375 zeros, so the stage sees
+	// 5375 samples: (5375 - 751 + 1) = 4625 filter positions, every second
+	// one output: ceil(4625 / 2) = 2313 output samples
+	assert.Len(t, outDecim, 2313)
 }

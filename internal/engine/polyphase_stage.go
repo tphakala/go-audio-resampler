@@ -54,6 +54,25 @@ type PolyphaseStage[F simdops.Float] struct {
 	// Statistics
 	samplesIn  int64
 	samplesOut int64
+
+	// Time alignment. The prototype has protoLen taps, so its group delay is
+	// gd = (protoLen-1)/2 phase units (rounded down when protoLen-1 is odd; the
+	// residual half unit is at most 1/(2*numPhases) stage-input samples). An
+	// output at phase position P then corresponds to input time
+	// (P - at0)/numPhases when the delay line starts with prefill zeros and
+	// the accumulator starts at at0, where
+	//
+	//	prefill = tapsPerPhase - 1 - gd/numPhases
+	//	at0     = (gd % numPhases) << phaseFracBits
+	//
+	// at0 is a whole number of phase units, so for exact-rational ratios the
+	// sub-phase fraction stays 0 and the cubic interpolation banks stay
+	// unused (see the getCoeff comment in NewPolyphaseStage).
+	prefill int   // zeros placed in history at construction and Reset
+	at0     int64 // initial accumulator position, fixed point
+	// fed is set by the first non-empty Process and cleared by Reset; Flush
+	// uses it because the prefilled history is never empty.
+	fed bool
 }
 
 // buildCubicInterpBanks builds the four Catmull-Rom sub-phase interpolation
@@ -175,7 +194,14 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 	// evaluated as coef(x) = a + x*(b + x*(c + x*d)) where x ∈ [0, 1)
 	polyCoeffs, polyCoeffsB, polyCoeffsC, polyCoeffsD := buildCubicInterpBanks[F](numPhases, tapsPerPhase, getCoeff)
 
-	return &PolyphaseStage[F]{
+	// Group delay in phase units, rounded down (see the alignment comment on
+	// the PolyphaseStage fields): whole input samples go to the prefill, the
+	// remaining whole phase units to the initial accumulator position.
+	gdInt := groupDelaySamples(filterBank.protoLen)
+	prefill := tapsPerPhase - 1 - gdInt/numPhases
+	st := &PolyphaseStage[F]{
+		prefill:       prefill,
+		at0:           int64(gdInt%numPhases) << phaseFracBits,
 		polyCoeffs:    polyCoeffs,
 		polyCoeffsB:   polyCoeffsB,
 		polyCoeffsC:   polyCoeffsC,
@@ -187,7 +213,9 @@ func NewPolyphaseStage[F simdops.Float](ratio, totalIORatio float64, hasPreStage
 		phaseFracBits: phaseFracBits,
 		history:       make([]F, 0, tapsPerPhase*historyBufferMultiplier),
 		ops:           ops,
-	}, nil
+	}
+	st.Reset()
+	return st, nil
 }
 
 // Process resamples input using soxr's polyphase algorithm with cubic coefficient interpolation.
@@ -210,6 +238,7 @@ func (s *PolyphaseStage[F]) processZeroCopy(input []F) ([]F, error) { //nolint:u
 	}
 
 	s.samplesIn += int64(len(input))
+	s.fed = true
 
 	// Append input to history.
 	// appendStable grows with headroom so steady-state streaming does not
@@ -306,36 +335,55 @@ func (s *PolyphaseStage[F]) Process(input []F) ([]F, error) {
 
 // Flush returns any remaining buffered samples.
 func (s *PolyphaseStage[F]) Flush() ([]F, error) {
-	// Nothing buffered: a stage that was never fed has no delay line to drain.
-	// Padding zeros into an empty history would emit a phantom window of
-	// zero-valued samples. Guard matches the sibling DFTStage.Flush.
-	if len(s.history) == 0 {
+	// A stage that was never fed has nothing to drain: padding zeros through
+	// it would emit a phantom window of zero-valued samples. The guard is the
+	// fed flag, not len(history), because the history starts prefilled.
+	// Matches the sibling DFTStage.Flush.
+	if !s.fed {
 		return []F{}, nil
 	}
 
-	// Process retains exactly tapsPerPhase-1 history samples, so that many
-	// padding zeros advance the delay line past the last real sample without
-	// producing an extra all-zero output window. historyBufferMultiplier is a
-	// buffer pre-allocation constant, not a flush-padding amount.
-	zeros := make([]F, s.tapsPerPhase-1)
+	// Outputs owed to the stream: every position whose content time is before
+	// the end of the real input, i.e. at < lim (the end of the real input in
+	// accumulator units, shifted by the initial offset at0). This is the same
+	// count a stage without alignment would produce. Everything is relative to
+	// the retained history, so it does not grow with stream length.
+	lim := int64(len(s.history)-s.prefill)*int64(s.numPhases)<<s.phaseFracBits + s.at0
+	owed := 0
+	if lim > s.at {
+		owed = int((lim - s.at + s.step - 1) / s.step)
+	}
+
+	// Padding tapsPerPhase-prefill zeros completes the window of the last
+	// real sample (gd/numPhases zeros past the centre, plus the rest of the
+	// window). The pad can also yield a few outputs past the end of the real
+	// input; they are truncated to owed. historyBufferMultiplier is a buffer
+	// pre-allocation constant, not a flush-padding amount.
+	zeros := make([]F, s.tapsPerPhase-s.prefill)
 	out, err := s.Process(zeros)
+	if err == nil && len(out) > owed {
+		out = out[:owed]
+	}
 	// Flush is terminal: after draining, return the stage to its fresh state.
-	// Otherwise the tapsPerPhase-1 padding zeros stay in the delay line, so the
-	// len(history)==0 guard never fires again: a second Flush keeps emitting
-	// all-zero windows and a post-flush Process convolves new audio against
-	// leftover zeros instead of starting a clean stream. Reset() is
-	// the authoritative fresh-state definition (phase accumulator, history, and
-	// sample counters); calling it keeps Flush aligned with it automatically.
+	// Otherwise the padding zeros stay in the delay line, so a second Flush
+	// would emit more windows and a post-flush Process would convolve new
+	// audio against leftover zeros instead of starting a clean stream.
+	// Reset() is the authoritative fresh-state definition (phase accumulator,
+	// prefilled history, and sample counters); calling it keeps Flush aligned
+	// with it automatically.
 	s.Reset()
 	return out, err
 }
 
-// Reset clears internal state.
+// Reset returns the stage to its just-constructed state: the accumulator is
+// back at its initial alignment offset and history holds the prefill.
 func (s *PolyphaseStage[F]) Reset() {
-	s.at = 0
-	s.history = s.history[:0]
+	s.at = s.at0
+	s.history = s.history[:s.prefill]
+	clear(s.history)
 	s.samplesIn = 0
 	s.samplesOut = 0
+	s.fed = false
 }
 
 // GetStatistics returns processing statistics.

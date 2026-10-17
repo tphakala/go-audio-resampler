@@ -100,6 +100,13 @@
 //
 // # Latency and Real-Time Streaming
 //
+// Output is time-aligned with the input for every preset: output sample n
+// corresponds to input time n/ratio (position n/ratio in input samples, where
+// ratio is outputRate/inputRate), as with libsoxr and sox rate. Each filter
+// stage starts as if the stream were preceded by silence, so the first samples
+// of a stream carry the filter's onset ramp, and a signal is neither shifted
+// early nor late.
+//
 // A streaming resampler has a startup deficit: the internal filter needs a
 // few samples of history before it can emit correctly filtered output, so
 // the first Process calls in a stream withhold roughly [SimpleResampler.Latency]
@@ -107,9 +114,11 @@
 // Callers that need a fixed number of output samples per callback, such as
 // a portaudio or miniaudio audio callback, should sit a small FIFO between
 // the resampler and the callback, primed with Latency() samples of silence.
-// Latency() matches the measured deficit to within about 2 samples, so
-// priming with it keeps callbacks fed in practice; any 1-2 sample shortfall
-// self-heals as the deficit-driven buffer sizing catches up:
+// Latency() is the filters' group delay and matches the measured deficit to
+// within about 2 samples, so priming with it keeps callbacks fed in practice;
+// any 1-2 sample shortfall self-heals as the deficit-driven buffer sizing
+// catches up. Because output is time-aligned, a FIFO primed with Latency()
+// zeros delays the delivered stream by exactly that many samples:
 //
 //	r, err := resampler.NewEngineFloat32(44100, 48000, resampler.QualityHigh)
 //	if err != nil {
