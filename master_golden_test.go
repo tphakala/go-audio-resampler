@@ -13,6 +13,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"testing"
+
+	"github.com/tphakala/simd/cpu"
 )
 
 // goldenFile holds output lengths and output checksums captured from the
@@ -23,13 +25,16 @@ import (
 //	sum <path> <in> <out> <preset> <n> <fnv64a of the output bits>
 //	sum-arm64 ...                                  (same, captured on arm64)
 //
-// The cubic stage is plain Go, and the compiler fuses multiply-adds on arm64,
-// so its output bits differ between amd64 and arm64; the checksum records are
-// therefore kept per architecture and skipped on others.
+// The cubic stage and the float64 filter design are plain Go, and the
+// compiler fuses multiply-adds on arm64, so output bits differ between amd64
+// and arm64; the checksum records are therefore kept per architecture and
+// skipped on others.
 //
 // The length records pin that alignment did not change how many samples a
 // stream produces. The checksum records pin that QualityQuick and unity
-// conversions, which were already aligned, are untouched.
+// conversions, which were already aligned, are untouched, and that engine-path
+// upsampling and integer decimation keep their bits when the non-integer
+// downsampling pre-stage is redesigned (goldenSumFIRRatios).
 const goldenFile = "testdata/golden_master.txt"
 
 var (
@@ -48,6 +53,17 @@ var (
 		{44100, 48000}, {48000, 44100}, {48000, 16000}, {8000, 48000}, {384000, 256000},
 	}
 	goldenSumUnityRates = []float64{8000, 44100, 48000}
+	// goldenSumFIRRatios are the FIR-stage conversions that must stay
+	// bit-identical when the non-integer downsampling pre-stage is redesigned:
+	// engine-path upsampling and integer decimation. 48000 to 16000 is on the
+	// list for the engine paths only: New factors a 2:1 half-band stage first
+	// and hands the non-integer remainder to the engine, so its bits change.
+	goldenSumFIRRatios = [][2]float64{
+		{44100, 48000}, {8000, 48000}, {22050, 48000}, {48000, 96000},
+		{32000, 44100}, {44100, 64000},
+		{48000, 24000}, {96000, 48000}, {48000, 16000},
+	}
+	goldenSumFIRPresets = []QualityPreset{QualityLow, QualityMedium, QualityHigh, QualityVeryHigh}
 	goldenSumSize       = 4801
 )
 
@@ -213,23 +229,28 @@ func TestOutputLength_MatchesMaster(t *testing.T) {
 	}
 }
 
-// goldenSumRows lists the (ratio, preset) pairs whose output bits are pinned.
-func goldenSumRows() (rows []struct {
+// goldenSumRow is one (ratio, preset) pair whose output bits are pinned.
+// skipNew excludes the New(&Config) path for rows whose output on that path
+// is expected to change legitimately.
+type goldenSumRow struct {
 	in, out float64
 	q       QualityPreset
-}) {
-	add := func(in, out float64, q QualityPreset) {
-		rows = append(rows, struct {
-			in, out float64
-			q       QualityPreset
-		}{in, out, q})
-	}
+	skipNew bool
+}
+
+// goldenSumRows lists the (ratio, preset) pairs whose output bits are pinned.
+func goldenSumRows() (rows []goldenSumRow) {
 	for _, rr := range goldenSumQuickRatios {
-		add(rr[0], rr[1], QualityQuick)
+		rows = append(rows, goldenSumRow{in: rr[0], out: rr[1], q: QualityQuick})
 	}
 	for _, rate := range goldenSumUnityRates {
 		for _, q := range goldenLenPresets {
-			add(rate, rate, q)
+			rows = append(rows, goldenSumRow{in: rate, out: rate, q: q})
+		}
+	}
+	for _, rr := range goldenSumFIRRatios {
+		for _, q := range goldenSumFIRPresets {
+			rows = append(rows, goldenSumRow{in: rr[0], out: rr[1], q: q, skipNew: rr[1] == 16000})
 		}
 	}
 	return rows
@@ -264,16 +285,28 @@ func TestQuickAndUnity_BitIdenticalToMaster(t *testing.T) {
 		t.Skipf("no checksum golden for %s", runtime.GOARCH)
 	}
 	// From GOAMD64=v3 the compiler fuses multiply-adds on amd64 as it does on
-	// arm64, so the cubic stage's bits differ from the amd64 golden. Unity
-	// rows do not run the cubic stage and stay checked.
+	// arm64, so the cubic stage and the filter design produce bits that differ
+	// from the amd64 golden (measured: the FIR rows fail under GOAMD64=v3).
+	// Unity rows run neither and stay checked.
 	fused := runtime.GOARCH == "amd64" && goamd64Fuses()
+	// The simd dot product runs an 8-wide AVX-512 kernel on hosts that have
+	// it, which sums in a different order than the AVX2 kernel the amd64
+	// golden was captured with (measured on a CI runner with AVX-512: the FIR
+	// rows differ in the last bits while Quick and unity still match).
+	wide := runtime.GOARCH == "amd64" && cpu.X86.AVX512F
 	golden := loadGolden(t)
 	in := goldenSignal(goldenSumSize)
 	for _, row := range goldenSumRows() {
-		if fused && row.q == QualityQuick && row.in != row.out {
+		if fused && row.in != row.out {
+			continue
+		}
+		if wide && row.q != QualityQuick && row.in != row.out {
 			continue
 		}
 		for _, path := range goldenPaths {
+			if row.skipNew && path == "new" {
+				continue
+			}
 			key := goldenKey(kind, path, row.in, row.out, row.q, goldenSumSize)
 			want, has := golden[key]
 			out, ok, err := goldenRun(path, row.in, row.out, row.q, in, 333)

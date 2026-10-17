@@ -202,6 +202,8 @@ func TestStreamingEquivalence_RandomChunkPlans(t *testing.T) {
 		{384000, 256000},
 		{44100, 48000},
 		{48000, 44100},
+		{44100, 16000},
+		{96000, 22050},
 	}
 	const plansPerRow = 20
 	for _, rr := range rows {

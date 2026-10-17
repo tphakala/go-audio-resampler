@@ -4,6 +4,7 @@
 package resampler
 
 import (
+	"math"
 	"testing"
 )
 
@@ -164,6 +165,37 @@ func BenchmarkProcessIntoFloat32_Warm_48to32(b *testing.B) {
 	_, _ = r.ProcessInto(input, output)
 
 	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_, _ = r.ProcessInto(input, output)
+	}
+}
+
+// BenchmarkProcessIntoFloat32_Warm_384to256_High benchmarks steady-state
+// float32 ProcessInto on the engine path for 384kHz to 256kHz at QualityHigh,
+// in 65536-sample chunks as the BirdNET-Go analysis path feeds it. The
+// non-integer downsampling pre-stage is the anti-alias filter here, so this is
+// the benchmark that tracks its cost. One iteration is one chunk (about
+// 0.17 s of audio).
+func BenchmarkProcessIntoFloat32_Warm_384to256_High(b *testing.B) {
+	const chunk = 65536
+	r, err := NewEngineFloat32(384000, 256000, QualityHigh)
+	if err != nil {
+		b.Fatal(err)
+	}
+	input := make([]float32, chunk)
+	for i := range input {
+		input[i] = float32(math.Sin(2*math.Pi*1000*float64(i)/384000)) * 0.5
+	}
+	output := make([]float32, r.EstimateOutput(chunk))
+
+	// Warm up past the pre-stage's startup transient.
+	for range 4 {
+		_, _ = r.ProcessInto(input, output)
+	}
+
+	b.ReportAllocs()
+	b.SetBytes(chunk * 4)
 	b.ResetTimer()
 	for b.Loop() {
 		_, _ = r.ProcessInto(input, output)

@@ -13,6 +13,11 @@ import (
 // reported before output was time-aligned, when Latency() was twice the
 // filters' group delay. Alignment halves them: a regression that restores
 // the old padding shows up as a value above half the old one.
+//
+// Conversions whose latency grew legitimately when non-integer downsampling
+// gained its anti-alias pre-stage have no row here (48000 to 44100 and
+// 384000 to 256000), or a cfg of 0 meaning unguarded (48000 to 16000 on New,
+// whose non-integer engine stage changed). antiAliasLatency pins those.
 var masterLatency = []struct {
 	in, out  float64
 	q        QualityPreset
@@ -22,14 +27,10 @@ var masterLatency = []struct {
 	{44100, 48000, QualityMedium, 160, 160},
 	{44100, 48000, QualityHigh, 214, 271},
 	{44100, 48000, QualityVeryHigh, 214, 345},
-	{48000, 44100, QualityLow, 135, 135},
-	{48000, 44100, QualityMedium, 135, 135},
-	{48000, 44100, QualityHigh, 177, 208},
-	{48000, 44100, QualityVeryHigh, 177, 270},
-	{48000, 16000, QualityLow, 82, 152},
-	{48000, 16000, QualityMedium, 292, 152},
-	{48000, 16000, QualityHigh, 375, 470},
-	{48000, 16000, QualityVeryHigh, 375, 619},
+	{48000, 16000, QualityLow, 82, 0},
+	{48000, 16000, QualityMedium, 292, 0},
+	{48000, 16000, QualityHigh, 375, 0},
+	{48000, 16000, QualityVeryHigh, 375, 0},
 	{48000, 24000, QualityLow, 81, 81},
 	{48000, 24000, QualityMedium, 292, 81},
 	{48000, 24000, QualityHigh, 375, 456},
@@ -42,10 +43,6 @@ var masterLatency = []struct {
 	{16000, 48000, QualityMedium, 393, 613},
 	{16000, 48000, QualityHigh, 492, 970},
 	{16000, 48000, QualityVeryHigh, 492, 1290},
-	{384000, 256000, QualityLow, 98, 98},
-	{384000, 256000, QualityMedium, 98, 98},
-	{384000, 256000, QualityHigh, 131, 166},
-	{384000, 256000, QualityVeryHigh, 131, 211},
 	{22050, 48000, QualityLow, 319, 445},
 	{22050, 48000, QualityMedium, 319, 445},
 	{22050, 48000, QualityHigh, 414, 704},
@@ -90,6 +87,10 @@ func TestLatency_MatchesMeasuredDeficit(t *testing.T) {
 		{384000, 256000},
 		{22050, 48000},
 		{48000, 48000},
+		{48000, 32000},
+		{96000, 64000},
+		{44100, 16000},
+		{96000, 22050},
 	} {
 		for _, q := range []QualityPreset{QualityQuick, QualityLow, QualityMedium, QualityHigh, QualityVeryHigh} {
 			r, err := NewEngine(c.in, c.out, q)
@@ -118,32 +119,40 @@ func TestLatency_MatchesMeasuredDeficit(t *testing.T) {
 	}
 }
 
-// Float32 mirror of one row of TestLatency_MatchesMeasuredDeficit: the float32
-// engine (NewEngineFloat32) must report the same startup deficit as the
-// float64 path.
+// Float32 mirror of TestLatency_MatchesMeasuredDeficit: the float32 engine
+// (NewEngineFloat32) must report the same startup deficit as the float64 path.
 func TestLatencyFloat32_MatchesMeasuredDeficit(t *testing.T) {
-	const in, out = 44100.0, 48000.0
-	for _, q := range []QualityPreset{QualityQuick, QualityLow, QualityMedium, QualityHigh, QualityVeryHigh} {
-		r, err := NewEngineFloat32(in, out, q)
-		if err != nil {
-			t.Fatal(err)
-		}
-		const n = 44100
-		sig := make([]float32, n)
-		for i := range sig {
-			sig[i] = float32(0.5 * math.Sin(2*math.Pi*997*float64(i)/in))
-		}
-		outSamples, err := r.Process(sig)
-		if err != nil {
-			t.Fatal(err)
-		}
-		measured := int(float64(n)*out/in) - len(outSamples)
-		got := r.Latency()
-		if got < measured-2 || got > measured+2 {
-			t.Errorf("q=%v: Latency()=%d, measured deficit %d", q, got, measured)
-		}
-		if eng, _, ok := masterLatencyFor(in, out, q); ok {
-			assertAtMostHalfMasterLatency(t, fmt.Sprintf("float32 %v to %v q=%v", in, out, q), got, eng)
+	for _, c := range []struct{ in, out float64 }{
+		{44100, 48000},
+		{48000, 32000},
+		{96000, 64000},
+		{44100, 16000},
+		{96000, 22050},
+		{384000, 256000},
+	} {
+		in, out := c.in, c.out
+		for _, q := range []QualityPreset{QualityQuick, QualityLow, QualityMedium, QualityHigh, QualityVeryHigh} {
+			r, err := NewEngineFloat32(in, out, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const n = 44100
+			sig := make([]float32, n)
+			for i := range sig {
+				sig[i] = float32(0.5 * math.Sin(2*math.Pi*997*float64(i)/in))
+			}
+			outSamples, err := r.Process(sig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			measured := int(float64(n)*out/in) - len(outSamples)
+			got := r.Latency()
+			if got < measured-2 || got > measured+2 {
+				t.Errorf("%v to %v q=%v: Latency()=%d, measured deficit %d", in, out, q, got, measured)
+			}
+			if eng, _, ok := masterLatencyFor(in, out, q); ok {
+				assertAtMostHalfMasterLatency(t, fmt.Sprintf("float32 %v to %v q=%v", in, out, q), got, eng)
+			}
 		}
 	}
 }
@@ -158,6 +167,9 @@ func TestGetLatency_ConfigPath_MatchesMeasuredDeficit(t *testing.T) {
 		{48000, 44100},
 		{8000, 48000},
 		{48000, 24000},
+		{384000, 256000},
+		{48000, 32000},
+		{48000, 16000},
 	} {
 		for _, preset := range []QualityPreset{QualityQuick, QualityLow, QualityMedium, QualityHigh, QualityVeryHigh} {
 			cfg := Config{
@@ -191,7 +203,7 @@ func TestGetLatency_ConfigPath_MatchesMeasuredDeficit(t *testing.T) {
 				t.Errorf("%v to %v %v: GetLatency()=%d, measured deficit %d",
 					c.in, c.out, preset, got, measured)
 			}
-			if _, cfgLat, ok := masterLatencyFor(c.in, c.out, preset); ok {
+			if _, cfgLat, ok := masterLatencyFor(c.in, c.out, preset); ok && cfgLat > 0 {
 				assertAtMostHalfMasterLatency(t, fmt.Sprintf("config %v to %v %v", c.in, c.out, preset), got, cfgLat)
 			}
 		}
@@ -217,5 +229,56 @@ func TestGetLatency_FallbackWithoutStartupDeficit(t *testing.T) {
 	// downstream ratio 0.5 to 16, so the total is 18.
 	if got := r.GetLatency(); got != 18 {
 		t.Errorf("GetLatency()=%d, want 18", got)
+	}
+}
+
+// antiAliasLatency pins Latency() (engine path) and GetLatency() (New path)
+// for the conversions whose latency changed when non-integer downsampling
+// gained its anti-alias pre-stage: the pre-stage is as long as the quality's
+// stopband needs at the target Nyquist, so Medium and above grow to about
+// 150 to 530 output samples and Low shrinks. eng is -1 where the engine path
+// decimates by an integer and did not change. Values were recorded from the
+// implementation and are cross-checked against the measured deficit by the
+// MatchesMeasuredDeficit tests above and by TestStartupDeficit_EqualsGroupDelay
+// in internal/engine.
+var antiAliasLatency = []struct {
+	in, out  float64
+	q        QualityPreset
+	eng, cfg int
+}{
+	{48000, 44100, QualityLow, 48, 48},
+	{48000, 44100, QualityMedium, 154, 48},
+	{48000, 44100, QualityHigh, 201, 241},
+	{48000, 44100, QualityVeryHigh, 201, 319},
+	{384000, 256000, QualityLow, 46, 46},
+	{384000, 256000, QualityMedium, 152, 46},
+	{384000, 256000, QualityHigh, 198, 245},
+	{384000, 256000, QualityVeryHigh, 198, 323},
+	{48000, 16000, QualityLow, -1, 73},
+	{48000, 16000, QualityMedium, -1, 73},
+	{48000, 16000, QualityHigh, -1, 397},
+	{48000, 16000, QualityVeryHigh, -1, 526},
+}
+
+// TestLatency_NonIntegerDownsampling_PinnedValues pins the exact latencies of
+// the anti-alias pre-stage chain (see antiAliasLatency).
+func TestLatency_NonIntegerDownsampling_PinnedValues(t *testing.T) {
+	for _, c := range antiAliasLatency {
+		if c.eng >= 0 {
+			e, err := NewEngine(c.in, c.out, c.q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := e.Latency(); got != c.eng {
+				t.Errorf("NewEngine %v to %v q=%v: Latency()=%d, want %d", c.in, c.out, c.q, got, c.eng)
+			}
+		}
+		r, err := New(newConfig(c.in, c.out, c.q, 1, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := r.GetLatency(); got != c.cfg {
+			t.Errorf("New %v to %v q=%v: GetLatency()=%d, want %d", c.in, c.out, c.q, got, c.cfg)
+		}
 	}
 }

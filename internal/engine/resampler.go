@@ -19,7 +19,10 @@ import (
 //
 // Architecture (matching soxr):
 //   - Integer ratios (e.g., 2×): Single DFT stage
-//   - Non-integer ratios (e.g., CD→DAT): DFT pre-stage + Polyphase stage
+//   - Integer downsampling: DFT decimation stage
+//   - Non-integer ratios (e.g., CD→DAT): 2x DFT pre-stage + Polyphase stage.
+//     When downsampling, the pre-stage is the anti-alias lowpass at the target
+//     Nyquist and the polyphase stage only interpolates (rejects images).
 //
 // The polyphase stage uses integer division/modulo for phase calculation,
 // exactly matching soxr's poly-fir0.h algorithm.
@@ -46,8 +49,10 @@ type Resampler[F simdops.Float] struct {
 // NewResampler creates a new resampler for the given sample rates.
 //
 // This implements soxr's multi-stage architecture:
-//   - For integer ratios: Uses only DFT stage
-//   - For non-integer ratios: Uses DFT pre-stage (2×) + polyphase stage
+//   - For integer ratios: Uses only a DFT stage (upsampling) or DFT decimation stage
+//   - For non-integer ratios: Uses DFT pre-stage (2×) + polyphase stage. For
+//     downsampling the pre-stage carries the anti-alias lowpass at the target
+//     Nyquist (see [NewDFTAntiAliasStage]).
 func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Quality) (*Resampler[F], error) {
 	if !(inputRate > 0) || !(outputRate > 0) {
 		return nil, fmt.Errorf("sample rates must be positive finite numbers: input=%f, output=%f", inputRate, outputRate)
@@ -83,8 +88,10 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 	}
 
 	// Determine architecture based on ratio
-	// Key insight: DFT pre-stage (upsampling) only makes sense for UPSAMPLING.
-	// For downsampling, we should NOT upsample first - go directly to polyphase.
+	// Upsampling uses the DFT stage as an anti-imaging filter. Downsampling by
+	// an integer ratio uses a DFT decimation stage; downsampling by a
+	// non-integer ratio uses a 2x DFT pre-stage designed as the anti-alias
+	// filter, then the polyphase stage (below).
 	if ratio >= 1.0 {
 		// UPSAMPLING (ratio >= 1.0)
 		if isIntegerRatio(ratio) {
@@ -142,21 +149,24 @@ func NewResampler[F simdops.Float](inputRate, outputRate float64, quality Qualit
 			r.decimationStage = decimStage
 			// No polyphase stage needed for integer decimation
 		} else {
-			// Non-integer downsampling: soxr uses 2x upsampling pre-stage + polyphase
-			// This approach gives better filter characteristics because:
-			// 1. The 2x upsampling moves frequencies up, giving more room for transition
-			// 2. The polyphase stage then has a cleaner decimation task
+			// Non-integer downsampling: 2x DFT pre-stage + polyphase stage, as
+			// libsoxr lays out ratios in (1, 1.5] (cr.c:319-321, preM=0, preL=2).
+			// The pre-stage is the anti-alias lowpass: its stopband sits at the
+			// target Nyquist (cr.c:383-387, Fn1 = arbM/arbL = 2*in/out). The
+			// polyphase stage after it only interpolates and rejects images, so
+			// without this design nothing would attenuate content between the
+			// target Nyquist and the input Nyquist.
 			//
 			// Example for 48kHz → 44.1kHz:
-			//   Pre-stage: 2x upsample (48 → 96 kHz)
+			//   Pre-stage: 2x upsample (48 → 96 kHz), lowpass at 22.05 kHz
 			//   Polyphase: 96 → 44.1 kHz (ratio = 0.459375)
 			preUpsampleFactor := 2
 			intermediateRate := inputRate * float64(preUpsampleFactor)
 
-			// Create DFT pre-stage (2× upsampling)
-			dftStage, err := NewDFTStage[F](preUpsampleFactor, quality)
+			// Create the DFT pre-stage (2× upsampling) as the anti-alias filter
+			dftStage, err := NewDFTAntiAliasStage[F](preUpsampleFactor, float64(preUpsampleFactor)*ioRatio, quality)
 			if err != nil {
-				return nil, fmt.Errorf("failed to create DFT pre-stage: %w", err)
+				return nil, fmt.Errorf("failed to create DFT anti-alias pre-stage: %w", err)
 			}
 			r.preStage = dftStage
 

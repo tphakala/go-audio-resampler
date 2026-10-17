@@ -277,11 +277,21 @@ func TestQualityRegression_Passband(t *testing.T) {
 	}
 }
 
-// TestQualityRegression_AntiAliasing is skipped - use TestAntiAliasing_Downsampling_CompareWithSoxr instead
-// The anti-aliasing measurement requires careful frequency placement and is already
-// thoroughly tested in antialiasing_test.go which compares against SOXR reference.
+// TestQualityRegression_AntiAliasing pins the alias rejection of the High
+// preset on the non-integer downsampling ratios the library is used for (the
+// tone oracle and its thresholds are shared with
+// TestAntiAliasing_NonIntegerDownsampling_MeetsStopband). The comparison with
+// libsoxr lives in TestAntiAliasing_Downsampling_CompareWithSoxr.
 func TestQualityRegression_AntiAliasing(t *testing.T) {
-	t.Skip("Anti-aliasing regression testing is done via TestAntiAliasing_Downsampling_CompareWithSoxr")
+	for _, rr := range [][2]float64{{48000, 32000}, {48000, 44100}} {
+		t.Run(fmt.Sprintf("%g_to_%g", rr[0], rr[1]), func(t *testing.T) {
+			t.Parallel()
+			worst := aaWorstAlias(t, rr[0], rr[1], QualityHigh)
+			if want := -qualityToAttenuation(QualityHigh); worst > want {
+				t.Errorf("alias level %.1f dB, want <= %.1f dB", worst, want)
+			}
+		})
+	}
 }
 
 // TestQualityRegression_OutputRatio verifies output/input sample count ratio is correct

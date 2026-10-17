@@ -12,11 +12,14 @@ import (
 )
 
 // =============================================================================
-// DFT Stage - Simple FIR-based upsampling
+// DFT Stage - Simple FIR-based upsampling and anti-alias pre-stage
 // =============================================================================
 
 // DFTStage implements integer-ratio upsampling using FIR filtering.
-// Uses polyphase decomposition to avoid multiplying zeros.
+// Uses polyphase decomposition to avoid multiplying zeros. The lowpass is the
+// anti-imaging filter ([NewDFTStage]) or, as the pre-stage of a non-integer
+// downsampling chain, the anti-alias filter at the target Nyquist
+// ([NewDFTAntiAliasStage]).
 //
 // Type parameter F controls the precision of sample processing.
 type DFTStage[F simdops.Float] struct {
@@ -62,7 +65,8 @@ type DFTStage[F simdops.Float] struct {
 	fed bool
 }
 
-// NewDFTStage creates a DFT upsampling stage.
+// NewDFTStage creates a DFT upsampling stage with an anti-imaging lowpass at
+// the input Nyquist.
 func NewDFTStage[F simdops.Float](factor int, quality Quality) (*DFTStage[F], error) {
 	if factor < 1 {
 		return nil, fmt.Errorf("upsampling factor must be >= 1: %d", factor)
@@ -97,6 +101,45 @@ func NewDFTStage[F simdops.Float](factor int, quality Quality) (*DFTStage[F], er
 		return nil, fmt.Errorf("failed to design DFT filter: %w", err)
 	}
 
+	return newDFTStageFromCoeffs(factor, coeffs, ops), nil
+}
+
+// minAntiAliasFactor is the smallest upsampling factor of an anti-alias
+// pre-stage; factor 1 would be a plain decimation stage.
+const minAntiAliasFactor = 2
+
+// NewDFTAntiAliasStage creates a 2x (or Lx) DFT stage whose lowpass is an
+// anti-alias filter for downsampling instead of an anti-imaging filter. fn is
+// soxr's Fn1 for the pre-stage: the stage output Nyquist divided by the
+// target Nyquist, which is factor * inputRate / outputRate for a chain that
+// upsamples by factor and then reduces the rate to outputRate. This is the
+// pre-stage design of libsoxr cr.c:383-387 (Fn1 = arbM / arbL, Fp1 /= Fn1,
+// Fs1 /= Fn1) for the layout this port always uses, a factor-2 pre-stage
+// followed by an arbitrary-ratio polyphase stage that only rejects images.
+//
+// The lowpass uses the same recipe as [NewDFTDecimationStage]
+// ([designDecimationLowpass]), so the passband edge matches the integer
+// decimation path and the stopband meets the quality's attenuation. The
+// half-band fast path of [newDFTStageFromCoeffs] does not engage because this
+// filter is not half-band (the detection returns false on its own).
+func NewDFTAntiAliasStage[F simdops.Float](factor int, fn float64, quality Quality) (*DFTStage[F], error) {
+	if factor < minAntiAliasFactor {
+		return nil, fmt.Errorf("anti-alias stage factor must be >= 2: %d", factor)
+	}
+	if !(fn > float64(factor)) {
+		return nil, fmt.Errorf("anti-alias stage fn must exceed the factor %d: %g", factor, fn)
+	}
+	coeffs, err := designDecimationLowpass(fn, quality)
+	if err != nil {
+		return nil, fmt.Errorf("failed to design anti-alias filter: %w", err)
+	}
+	return newDFTStageFromCoeffs(factor, coeffs, simdops.For[F]()), nil
+}
+
+// newDFTStageFromCoeffs builds a factor-times polyphase upsampling stage
+// around the lowpass prototype coeffs (odd length, unity DC gain before the
+// factor scaling applied here).
+func newDFTStageFromCoeffs[F simdops.Float](factor int, coeffs []float64, ops *simdops.Ops[F]) *DFTStage[F] {
 	// Decompose into polyphase filter bank
 	// coeffs[phase][tap] = prototype[tap * factor + phase]
 	// This avoids multiplying by zeros after zero-insertion
@@ -168,7 +211,7 @@ func NewDFTStage[F simdops.Float](factor int, quality Quality) (*DFTStage[F], er
 		skip:            gd % factor,
 	}
 	st.Reset()
-	return st, nil
+	return st
 }
 
 // processZeroCopy upsamples the input using polyphase FIR filtering.
@@ -450,6 +493,56 @@ type DFTDecimationStage[F simdops.Float] struct {
 	fed bool
 }
 
+// designDecimationLowpass designs the lowpass used by the decimation recipe
+// (always in float64 for precision). fn is soxr's Fn: the factor by which the
+// stage's input Nyquist is divided to place the stopband at the output
+// Nyquist. The result is the prototype in forward order.
+//
+// soxr filter design for decimation (from SOXR_FILTER_ANALYSIS.md):
+//
+//	Fn = max(preL, preM) = factor (for pure decimation, preL=1, preM=factor)
+//	Fp = quality passband end (relative to input Nyquist before normalization)
+//	Fs = 1.0 (stopband at output Nyquist, relative to input Nyquist)
+//
+// After normalization by Fn:
+//
+//	Fp_norm = Fp / Fn
+//	Fs_norm = 1.0 / Fn
+//
+// In our filter design convention (0.5 = Nyquist of the current rate):
+// cutoff = (Fs_norm - trBW) * 0.5, so for Fn=2 the cutoff sits just below
+// 50% of the INPUT Nyquist, which is the OUTPUT Nyquist.
+func designDecimationLowpass(fn float64, quality Quality) ([]float64, error) {
+	// soxrFp: Passband end (relative to input Nyquist = 1.0)
+	// soxrFs: Stopband start (at input Nyquist = output Nyquist after decimation)
+	soxrFp := qualityToPassbandEnd(quality)
+	soxrFs := 1.0
+
+	// Normalize by Fn
+	FpNorm := soxrFp / fn
+	FsNorm := soxrFs / fn
+
+	// Transition bandwidth
+	trBW := transitionBandwidthHalf * (FsNorm - FpNorm)
+
+	// Cutoff frequency (in our normalization where 0.5 = Nyquist)
+	// soxr: Fc = Fs_norm - tr_bw
+	Fc := FsNorm - trBW
+
+	// Convert to our filter design convention (0.5 = Nyquist)
+	cutoff := Fc * nyquistFraction // Scale to 0-0.5 range
+
+	attenuation := qualityToAttenuation(quality)
+
+	// Use auto filter design with transition bandwidth scaled to our convention
+	transitionBW := trBW * nyquistFraction // Scale to 0-0.5 range
+	coeffs, err := filter.DesignLowPassFilterAuto(cutoff, transitionBW, attenuation, 1.0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to design decimation filter: %w", err)
+	}
+	return coeffs, nil
+}
+
 // NewDFTDecimationStage creates a DFT decimation stage for integer ratio downsampling.
 //
 // This implements soxr's approach for integer downsampling ratios:
@@ -473,51 +566,9 @@ func NewDFTDecimationStage[F simdops.Float](factor int, quality Quality) (*DFTDe
 		return &DFTDecimationStage[F]{factor: 1, ops: ops}, nil
 	}
 
-	// Design lowpass filter for decimation (always in float64 for precision)
-	//
-	// soxr filter design for decimation (from SOXR_FILTER_ANALYSIS.md):
-	//   Fn = max(preL, preM) = factor (for pure decimation, preL=1, preM=factor)
-	//   Fp = 0.913 (VHQ passband, relative to input Nyquist before normalization)
-	//   Fs = 1.0 (stopband at output Nyquist, relative to input Nyquist)
-	//
-	// After normalization by Fn:
-	//   Fp_norm = 0.913 / factor
-	//   Fs_norm = 1.0 / factor
-	//
-	// For factor=2: Fp_norm=0.4565, Fs_norm=0.5
-	// This places cutoff just below output Nyquist
-	//
-	// In our filter design (where 0.5 = Nyquist of current sample rate):
-	//   cutoff = Fs_norm * 0.5 = 0.5 / factor = 0.25 for factor=2
-	//   This means cutoff at 25% of INPUT sample rate = 50% of OUTPUT Nyquist
-
-	// Get quality-specific passband end and stopband start
-	// soxrFp: Passband end (relative to input Nyquist = 1.0)
-	// soxrFs: Stopband start (at input Nyquist = output Nyquist after decimation)
-	soxrFp := qualityToPassbandEnd(quality)
-	soxrFs := 1.0
-
-	// Normalize by Fn (decimation factor)
-	FpNorm := soxrFp / float64(factor)
-	FsNorm := soxrFs / float64(factor)
-
-	// Transition bandwidth
-	trBW := transitionBandwidthHalf * (FsNorm - FpNorm)
-
-	// Cutoff frequency (in our normalization where 0.5 = Nyquist)
-	// soxr: Fc = Fs_norm - tr_bw
-	Fc := FsNorm - trBW
-
-	// Convert to our filter design convention (0.5 = Nyquist)
-	cutoff := Fc * nyquistFraction // Scale to 0-0.5 range
-
-	attenuation := qualityToAttenuation(quality)
-
-	// Use auto filter design with transition bandwidth scaled to our convention
-	transitionBW := trBW * nyquistFraction // Scale to 0-0.5 range
-	coeffs, err := filter.DesignLowPassFilterAuto(cutoff, transitionBW, attenuation, 1.0)
+	coeffs, err := designDecimationLowpass(float64(factor), quality)
 	if err != nil {
-		return nil, fmt.Errorf("failed to design decimation filter: %w", err)
+		return nil, err
 	}
 
 	// Convert coefficients to target precision F and reverse for convolution
