@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Nyquist, float64): 0 dB before; now -108 (Low), -110 (Medium), -135 (High), -180
   (engine VeryHigh), -157 (24-bit) and -204 dB (32-bit), each at or past the
   preset's stopband. The passband edge matches the integer decimation path (High:
-  -3 dB at 0.953 of the output Nyquist; libsoxr HQ 0.950) and is flat to 0.0001 dB
+  -3 dB at 0.953 of the output Nyquist; libsoxr HQ 0.950) and is flat to 0.01 dB
   up to 0.9 of it for Medium and above. The same 120 dB spectrogram is now
   raster-equal 0.9966 with 26 of 132098 pixels more than two palette steps
   apart.
@@ -64,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (384000 to 8000, High: -89.9 dB measured).
   - **`New` at `QualityMedium`** reaches the engine's Low filter (the 16-bit
     Medium preset maps to `engine.QualityLow`), so it is -3 dB at 0.824 of the
-    output Nyquist, while `NewEngine` Medium is flat to 0.94. This mapping is
+    output Nyquist, while `NewEngine` Medium is flat to 0.01 dB up to 0.9 and -3 dB at 0.951. This mapping is
     unchanged and tracked in #76.
   - **Unchanged:** `QualityQuick` (cubic only, no anti-alias filter when
     downsampling, as libsoxr QQ), unity conversions, upsampling, integer

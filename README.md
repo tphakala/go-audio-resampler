@@ -355,7 +355,7 @@ figures come from the bundled quality-regression suite and are reproducible with
 - **High and VeryHigh presets match or exceed libsoxr quality**, within 0.5 dB (High slightly better, VeryHigh essentially identical)
 - **Low and Medium track libsoxr closely**: Medium is within ~1 dB and Low within ~4 dB, trading a little stopband headroom for lower passband ripple
 - All presets achieve SNR (Signal-to-Noise Ratio) matching libsoxr within measurement tolerance
-- Downsampling removes content above the output Nyquist: alias rejection meets each preset's stopband on integer and non-integer ratios, up to the ratio limit given under [Downsampling anti-aliasing](#downsampling-anti-aliasing)
+- Downsampling removes content above the output Nyquist: alias rejection meets the stopband of the preset's filter on integer and non-integer ratios (`VeryHigh` through `NewEngine*` is the High filter), up to the ratio limit given under [Downsampling anti-aliasing](#downsampling-anti-aliasing); `QualityQuick` and 8-bit precision on `New` do not anti-alias
 
 > **Why does Low show better THD than Medium?** Both presets are 16-bit (same noise
 > floor), so the difference is filter geometry, not precision. Low keeps its passband
@@ -388,7 +388,7 @@ libsoxr columns are its LQ, MQ, HQ and VHQ recipes (libsoxr 0.1.3) measured the 
 
 Three things to know:
 
-- **`QualityMedium` on `New`.** `New(&Config)` sends the 16-bit Medium preset to the Low-precision filter (-3 dB at 0.824 of the output Nyquist), whereas `NewEngine` Medium is flat to 0.94. The documented 90% Medium passband above is therefore not what `New` delivers on any ratio that needs a filter. This mapping is tracked in issue #76.
+- **`QualityMedium` on `New`.** `New(&Config)` sends the 16-bit Medium preset to the Low-precision filter (-3 dB at 0.824 of the output Nyquist), whereas `NewEngine` Medium is flat to 0.01 dB up to 0.9 and -3 dB at 0.951. The documented 90% Medium passband above is therefore not what `New` delivers on any ratio that needs a filter. This mapping is tracked in issue #76.
 - **Ratio limit.** The pre-stage filter grows about linearly with the input/output ratio and is capped at 8191 taps, so the stopband is only guaranteed up to the ratio that cap supports. Measured (`NewEngine`, float64): High meets its 126 dB stopband at 11.0:1 (352.8kHz → 32kHz, -134.6 dB) and 17.4:1 (384kHz → 22.05kHz, -131.5 dB), but only reaches -42.4 dB at 34.8:1 (384kHz → 11.025kHz); Medium reaches -109.3 dB at 11.0:1 and -109.5 dB at 17.4:1, and -55.8 dB at 34.8:1. Ratios between 17.4:1 and 34.8:1 were not measured. `New` never hands the engine more than 2:1, so this applies to `NewEngine*`, the one-shot helpers and the CLI. Integer decimation hits the same cap (384kHz → 8kHz, 48:1, High: -89.9 dB measured). Cascading 2:1 stages to lift the limit is a planned follow-up.
 - **`QualityQuick`** does not anti-alias when downsampling: it is a cubic interpolator only, like libsoxr's QQ (measured: tones at 1.01 to 1.3 times the output Nyquist fold back at -1.5 to -3.7 dB for 384kHz → 256kHz).
 
