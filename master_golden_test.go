@@ -13,6 +13,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"testing"
+
+	"github.com/tphakala/simd/cpu"
 )
 
 // goldenFile holds output lengths and output checksums captured from the
@@ -287,10 +289,18 @@ func TestQuickAndUnity_BitIdenticalToMaster(t *testing.T) {
 	// from the amd64 golden (measured: the FIR rows fail under GOAMD64=v3).
 	// Unity rows run neither and stay checked.
 	fused := runtime.GOARCH == "amd64" && goamd64Fuses()
+	// The simd dot product runs an 8-wide AVX-512 kernel on hosts that have
+	// it, which sums in a different order than the AVX2 kernel the amd64
+	// golden was captured with (measured on a CI runner with AVX-512: the FIR
+	// rows differ in the last bits while Quick and unity still match).
+	wide := runtime.GOARCH == "amd64" && cpu.X86.AVX512F
 	golden := loadGolden(t)
 	in := goldenSignal(goldenSumSize)
 	for _, row := range goldenSumRows() {
 		if fused && row.in != row.out {
+			continue
+		}
+		if wide && row.q != QualityQuick && row.in != row.out {
 			continue
 		}
 		for _, path := range goldenPaths {

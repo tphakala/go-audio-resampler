@@ -47,14 +47,17 @@ func writeInt16WAV(t *testing.T, path string, samples []float64, rate int) {
 	}
 }
 
-// spectrogramClip is the analysis clip of a spectrogram consumer: three tones
-// and a chirp placed relative to the Nyquist, rounded to int16 values.
+// spectrogramClip is the analysis clip of a spectrogram consumer: tones and a
+// chirp placed relative to the Nyquist, rounded to int16 values. The 0.8
+// tone lies above the output Nyquist of both tested ratios (about 0.67), so
+// without the anti-alias lowpass it folds into the passband.
 func spectrogramClip(rate, secs int) []float64 {
 	nyq := float64(rate) / 2
 	out := make([]float64, rate*secs)
 	for i := range out {
 		tm := float64(i) / float64(rate)
-		v := 0.25*math.Sin(2*math.Pi*0.12*nyq*tm) + 0.15*math.Sin(2*math.Pi*0.31*nyq*tm)
+		v := 0.25*math.Sin(2*math.Pi*0.12*nyq*tm) + 0.15*math.Sin(2*math.Pi*0.31*nyq*tm) +
+			0.1*math.Sin(2*math.Pi*0.8*nyq*tm)
 		v += 0.2 * math.Sin(2*math.Pi*(0.05*nyq+0.2*nyq*tm/float64(secs))*tm)
 		out[i] = math.Round(v * math.MaxInt16)
 	}
