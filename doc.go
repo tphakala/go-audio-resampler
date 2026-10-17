@@ -101,10 +101,11 @@
 // # Latency and Real-Time Streaming
 //
 // Output is time-aligned with the input for every preset: output sample n
-// corresponds to input time n/ratio (the sample at index n*ratio of the input
-// stream), as with libsoxr and sox rate. Each filter stage starts as if the
-// stream were preceded by silence, so the first samples of a stream carry the
-// filter's onset ramp, and a signal is neither shifted early nor late.
+// corresponds to input time n/ratio (position n/ratio in input samples, where
+// ratio is outputRate/inputRate), as with libsoxr and sox rate. Each filter
+// stage starts as if the stream were preceded by silence, so the first samples
+// of a stream carry the filter's onset ramp, and a signal is neither shifted
+// early nor late.
 //
 // A streaming resampler has a startup deficit: the internal filter needs a
 // few samples of history before it can emit correctly filtered output, so
