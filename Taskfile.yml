@@ -74,7 +74,7 @@ tasks:
     desc: Run soxr comparison tests
     deps: [build:soxr-ref]
     cmds:
-      - go test -v ./pkg/engine/... -run Soxr
+      - go test -v ./internal/engine/... -run Soxr
 
   # Benchmark tasks
   bench:
@@ -85,18 +85,18 @@ tasks:
   bench:engine:
     desc: Run engine benchmarks
     cmds:
-      - go test -bench=. -benchmem ./pkg/engine/...
+      - go test -bench=. -benchmem ./internal/engine/...
 
   bench:profile:
     desc: Run benchmarks with CPU profiling
     cmds:
-      - go test -bench=BenchmarkBreakdown -cpuprofile=cpu.prof ./pkg/engine/...
+      - go test -bench=BenchmarkResampler -cpuprofile=cpu.prof ./internal/engine/...
 
   bench:compare:
     desc: Compare Go vs soxr performance
     deps: [build:soxr-ref]
     cmds:
-      - go test -bench=BenchmarkResampler -benchmem ./pkg/engine/...
+      - go test -bench=BenchmarkResampler -benchmem ./internal/engine/...
       - ./test-reference/bench_soxr
 
   # Lint and format tasks
