@@ -2,12 +2,18 @@
  * soxr reference implementation for testing Go audio resampler
  *
  * Compiles with: gcc -o test_soxr_reference test_soxr_reference.c -lsoxr -lm
- * Usage: ./test_soxr_reference <input_rate> <output_rate> <signal_type> [frequency]
+ * Usage: ./test_soxr_reference <input_rate> <output_rate> <signal_type> [frequency [quality]]
  *
  * signal_type:
  *   dc       - DC signal (value=1.0)
  *   sine     - Sine wave at specified frequency (default 1000Hz)
  *   impulse  - Impulse signal
+ *
+ * frequency is ignored for dc and impulse, but must be given when quality is.
+ *
+ * quality (libsoxr recipe, default veryhigh):
+ *   quick, low, medium, high, veryhigh
+ * The recipe used is echoed in the "# quality:" header line.
  */
 
 #include <stdio.h>
@@ -53,7 +59,7 @@ void generate_signal(double *buffer, size_t num_samples, signal_type_t type,
 
 int main(int argc, char *argv[]) {
     if (argc < 4) {
-        fprintf(stderr, "Usage: %s <input_rate> <output_rate> <signal_type> [frequency]\n", argv[0]);
+        fprintf(stderr, "Usage: %s <input_rate> <output_rate> <signal_type> [frequency [quality]]\n", argv[0]);
         fprintf(stderr, "Signal types: dc, sine, impulse\n");
         return 1;
     }
@@ -63,6 +69,23 @@ int main(int argc, char *argv[]) {
     double output_rate = atof(argv[2]);
     char *signal_name = argv[3];
     double frequency = (argc > 4) ? atof(argv[4]) : 1000.0;
+
+    /* Quality recipe; an unknown name is an error so a typo cannot silently
+     * compare against the wrong recipe. */
+    unsigned long recipe = SOXR_VHQ;
+    const char *quality_name = "veryhigh";
+    if (argc > 5) {
+        quality_name = argv[5];
+        if (strcmp(quality_name, "quick") == 0) recipe = SOXR_QQ;
+        else if (strcmp(quality_name, "low") == 0) recipe = SOXR_LQ;
+        else if (strcmp(quality_name, "medium") == 0) recipe = SOXR_MQ;
+        else if (strcmp(quality_name, "high") == 0) recipe = SOXR_HQ;
+        else if (strcmp(quality_name, "veryhigh") == 0) recipe = SOXR_VHQ;
+        else {
+            fprintf(stderr, "Unknown quality: %s (quick, low, medium, high, veryhigh)\n", quality_name);
+            return 1;
+        }
+    }
 
     /* Determine signal type */
     signal_type_t signal_type;
@@ -94,11 +117,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Configure soxr for high quality (matching our Go implementation) */
     soxr_io_spec_t io_spec = soxr_io_spec(SOXR_FLOAT64_I, SOXR_FLOAT64_I);
 
-    /* Use VHQ quality (very high quality) */
-    soxr_quality_spec_t quality_spec = soxr_quality_spec(SOXR_VHQ, 0);
+    /* Quality recipe from the command line (default VHQ) */
+    soxr_quality_spec_t quality_spec = soxr_quality_spec(recipe, 0);
 
     /* Create soxr instance */
     soxr_error_t error;
@@ -140,10 +162,11 @@ int main(int argc, char *argv[]) {
     printf("# input_rate: %.1f\n", input_rate);
     printf("# output_rate: %.1f\n", output_rate);
     printf("# signal_type: %s\n", signal_name);
+    printf("# quality: %s\n", quality_name);
     if (signal_type == SIGNAL_SINE) {
         printf("# frequency: %.1f\n", frequency);
     }
-    printf("# input_samples: %zu\n", INPUT_SAMPLES);
+    printf("# input_samples: %zu\n", (size_t)INPUT_SAMPLES);
     printf("# output_samples: %zu\n", output_done);
     printf("# ratio: %.10f\n", output_rate / input_rate);
     printf("#\n");

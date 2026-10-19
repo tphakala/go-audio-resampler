@@ -3,83 +3,164 @@
 
 package engine
 
+// These tests compare the Go resampler with libsoxr on DC, sine and impulse
+// inputs, using the C tool in test-reference/ (build it with `task test:soxr`).
+// Each Go preset is compared with the libsoxr recipe of the same name, and the
+// tool echoes the recipe it ran so a stale binary built from older source fails
+// instead of comparing against the wrong recipe.
+//
+// They pin two things: time alignment against libsoxr (output sample n
+// corresponds to input time n/ratio, AGENTS.md design rule 7), asserted as a
+// sub-sample lag with no search over offsets, and waveform agreement for the
+// same recipe. A search over offsets would hide a misaligned output, which is
+// the failure these tests exist to catch.
+//
+// Tolerances were measured on linux/arm64 with libsoxr 0.1.3 (the Debian
+// bookworm package) for High and VeryHigh, and are tighter than the thresholds
+// this file used before the tool could run. Delaying the Go output by one
+// sample made every sine and impulse lag check fail with a lag of about 1.0
+// output samples.
+
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 )
 
 const (
-	// Path to soxr reference tool (absolute path)
-	soxrRefPath = "/home/thakala/src/go-audio-resample/test-reference/test_soxr_reference"
+	soxrRefToolName = "test_soxr_reference"
 
-	// Tolerance for comparing outputs
-	// These account for filter design differences between our Kaiser-windowed FIR
-	// and soxr's Dolph-Chebyshev design. The key metric is correlation, not absolute error.
+	// soxrSignalSamples is the input length; it matches INPUT_SAMPLES in
+	// test-reference/test_soxr_reference.c.
+	soxrSignalSamples = 4000
 
-	// Correlation threshold - signals should have same shape
-	correlationThreshold = 0.95 // 0.95+ correlation indicates correct resampling
+	// Default comparison window: skip the startup ramp, then compare a fixed
+	// span of output samples. Impulse windows are centred on the libsoxr peak.
+	soxrWindowStart = 300
+	soxrWindowLen   = 2000
 
-	// Max error threshold - allows for filter design differences
-	// Note: Different filter designs can have ~10% peak differences at high frequencies
-	maxErrorThreshold = 0.20 // 20% max error (filter design differences)
+	// A window shorter than this is too little evidence to pass.
+	soxrMinWindow = 500
 
-	// Stricter thresholds for low frequency signals
-	lowFreqMaxError    = 0.15 // 15% for f < 5kHz
-	lowFreqCorrelation = 0.99 // 99%+ for low frequencies
+	// Largest allowed lag versus libsoxr, in output samples. Measured worst
+	// for High and VeryHigh: sine 0.00157 (phase fit), impulse peak 0.0042. A
+	// one-sample delay gives about 1.0.
+	soxrMaxLag = 0.01
 
-	// DC tolerance (should be very tight)
-	dcTolerance = 0.01 // 1% for DC signals
+	// DC: measured worst max error 0.00124 (High and VeryHigh). The previous
+	// limit was 0.01.
+	soxrDCMaxError = 0.005
 
-	// Standard test signal length
-	testSignalSamples = 4000
+	// Sine: measured worst max error 0.000223 and correlation 1.0000000 (High
+	// and VeryHigh). The previous limits were 0.15 to 0.20 and 0.95 to 0.99.
+	soxrSineMaxError = 0.002
+	soxrSineMinCorr  = 0.9999
+
+	// Impulse: measured worst max error 0.0029 and correlation 0.99972 (High
+	// and VeryHigh). The previous correlation limit was 0.5.
+	soxrImpulseMaxError = 0.01
+	soxrImpulseMinCorr  = 0.999
+
+	// Length contract: the Go output has the same length as libsoxr or one
+	// more, inside the [floor, ceil+1] bound that flush_length_test.go:45-47
+	// (root package) pins.
+	soxrMaxExtraSamples = 1
 )
 
-// getSoxrReference runs the soxr reference tool and returns output samples
-func getSoxrReference(ctx context.Context, inputRate, outputRate float64, signalType string, frequency float64) ([]float64, error) {
-	args := []string{
-		fmt.Sprintf("%.0f", inputRate),
-		fmt.Sprintf("%.0f", outputRate),
-		signalType,
+// soxrWaveformPresets are the presets compared against libsoxr: the ones
+// AGENTS.md names as the libsoxr HQ and VHQ match.
+var soxrWaveformPresets = func() []qualityPresetPair {
+	var presets []qualityPresetPair
+	for _, p := range qualityPresets {
+		if p.goQuality == QualityHigh || p.goQuality == QualityVeryHigh {
+			presets = append(presets, p)
+		}
 	}
-	if signalType == "sine" {
-		args = append(args, fmt.Sprintf("%.0f", frequency))
-	}
+	return presets
+}()
 
-	cmd := exec.CommandContext(ctx, soxrRefPath, args...)
+// soxrReferenceTool returns the path of the libsoxr reference tool, resolved
+// from this source file. It skips the test when the tool has not been built;
+// any other stat error fails, so a broken checkout is not hidden.
+func soxrReferenceTool(t *testing.T) string {
+	t.Helper()
+
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine the path of soxr_comparison_test.go")
+	}
+	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "test-reference", soxrRefToolName)
+
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			t.Skipf("libsoxr reference tool not built at %s; run `task test:soxr` (needs libsoxr and fftw3)", path)
+		}
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return path
+}
+
+// getSoxrReference runs the tool and returns its output samples. It fails when
+// the tool cannot run, prints an unparsable sample line, or reports a recipe
+// other than the requested one.
+func getSoxrReference(ctx context.Context, tool string, inputRate, outputRate float64, signalType string, frequency float64, quality string) ([]float64, error) {
+	cmd := exec.CommandContext(ctx, tool,
+		strconv.FormatFloat(inputRate, 'f', 0, 64),
+		strconv.FormatFloat(outputRate, 'f', 0, 64),
+		signalType,
+		strconv.FormatFloat(frequency, 'f', 0, 64),
+		quality)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("soxr reference failed: %w", err)
+		return nil, fmt.Errorf("%s failed: %w: %s", tool, err, strings.TrimSpace(stderr.String()))
 	}
 
-	// Parse output
-	// Pre-allocate with estimated capacity (typically ~5000 samples for our test signals)
-	samples := make([]float64, 0, 8192)
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	var samples []float64
+	echoed := ""
+	scanner := bufio.NewScanner(bytes.NewReader(output))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[") {
+		if line == "" {
+			continue
+		}
+		if rest, ok := strings.CutPrefix(line, "# quality:"); ok {
+			echoed = strings.TrimSpace(rest)
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
 			continue
 		}
 		val, err := strconv.ParseFloat(line, 64)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("unparsable sample line %q: %w", line, err)
 		}
 		samples = append(samples, val)
 	}
-
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("reading %s output: %w", tool, err)
+	}
+	if echoed != quality {
+		return nil, fmt.Errorf("%s reported quality %q, want %q; rebuild it with `make -C test-reference`", tool, echoed, quality)
+	}
 	return samples, nil
 }
 
-// generateTestSignal creates a test signal matching the C reference.
-// Uses testSignalSamples (4000) as the fixed signal length.
-func generateTestSignal(signalType string, sampleRate, frequency float64) []float64 {
-	signal := make([]float64, testSignalSamples)
+// generateSoxrTestSignal creates the same input as test_soxr_reference.c.
+func generateSoxrTestSignal(signalType string, sampleRate, frequency float64) []float64 {
+	signal := make([]float64, soxrSignalSamples)
 
 	switch signalType {
 	case "dc":
@@ -88,313 +169,247 @@ func generateTestSignal(signalType string, sampleRate, frequency float64) []floa
 		}
 	case "sine":
 		for i := range signal {
-			phase := 2.0 * math.Pi * frequency * float64(i) / sampleRate
-			signal[i] = math.Sin(phase)
+			signal[i] = math.Sin(2.0 * math.Pi * frequency * float64(i) / sampleRate)
 		}
 	case "impulse":
-		signal[testSignalSamples/2] = 1.0
+		signal[soxrSignalSamples/2] = 1.0
 	}
 
 	return signal
 }
 
-// findBestOffset finds the offset that maximizes correlation between two signals
-func findBestOffset(got, want []float64) int {
-	bestOffset := 0
-	bestCorr := -2.0
+// resampleSoxrSignal runs the Go resampler on the test signal, then flushes.
+func resampleSoxrSignal(t *testing.T, quality Quality, inputRate, outputRate float64, signalType string, frequency float64) []float64 {
+	t.Helper()
 
-	// Search range based on expected latency differences
-	searchRange := 600
-
-	for offset := -searchRange; offset <= searchRange; offset++ {
-		corr := computeCorrelationWithSkip(got, want, offset, 200)
-		if corr > bestCorr {
-			bestCorr = corr
-			bestOffset = offset
-		}
+	r, err := NewResampler[float64](inputRate, outputRate, quality)
+	if err != nil {
+		t.Fatalf("NewResampler failed: %v", err)
 	}
-
-	return bestOffset
+	output, err := r.Process(generateSoxrTestSignal(signalType, inputRate, frequency))
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+	tail, err := r.Flush()
+	if err != nil {
+		t.Fatalf("Flush failed: %v", err)
+	}
+	return append(output, tail...)
 }
 
-// computeCorrelationWithSkip computes Pearson correlation between two signals with a given offset.
-// skipSamples specifies how many initial samples to skip (for transient avoidance).
-// offset shifts signal 'a' relative to 'b' (positive = a is ahead of b).
-// Returns correlation coefficient, or -2 if insufficient data.
-func computeCorrelationWithSkip(a, b []float64, offset, skipSamples int) float64 {
-	startA := skipSamples
-	startB := skipSamples
+// soxrReference returns the libsoxr output for one case, failing the test when
+// the tool misbehaves.
+func soxrReference(t *testing.T, tool string, inputRate, outputRate float64, signalType string, frequency float64, quality string) []float64 {
+	t.Helper()
 
-	if offset > 0 {
-		startA += offset
-	} else {
-		startB -= offset
+	want, err := getSoxrReference(t.Context(), tool, inputRate, outputRate, signalType, frequency, quality)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	n := 1000 // Compare 1000 samples
-	if startA+n > len(a) || startB+n > len(b) {
-		return -2
-	}
-
-	sumA, sumB, sumAB, sumA2, sumB2 := 0.0, 0.0, 0.0, 0.0, 0.0
-	for i := range n {
-		va := a[startA+i]
-		vb := b[startB+i]
-		sumA += va
-		sumB += vb
-		sumAB += va * vb
-		sumA2 += va * va
-		sumB2 += vb * vb
-	}
-
-	meanA := sumA / float64(n)
-	meanB := sumB / float64(n)
-
-	num := sumAB - float64(n)*meanA*meanB
-	denA := math.Sqrt(sumA2 - float64(n)*meanA*meanA)
-	denB := math.Sqrt(sumB2 - float64(n)*meanB*meanB)
-
-	if denA == 0 || denB == 0 {
-		return 0
-	}
-
-	return num / (denA * denB)
+	return want
 }
 
-// compareOutputs compares two output arrays with automatic alignment
-// Returns max error and correlation after accounting for latency offset
-func compareOutputs(got, want []float64) (maxErr, rmsErr, correlation float64, errIdx int) {
-	if len(got) < 500 || len(want) < 500 {
-		return 0, 0, 0, -1
+// checkSoxrLength fails when the Go output is shorter than libsoxr's or more
+// than soxrMaxExtraSamples longer.
+func checkSoxrLength(t *testing.T, got, want []float64) {
+	t.Helper()
+
+	if extra := len(got) - len(want); extra < 0 || extra > soxrMaxExtraSamples {
+		t.Errorf("output length %d, libsoxr %d: want between 0 and %d extra samples", len(got), len(want), soxrMaxExtraSamples)
+	}
+}
+
+type soxrStats struct {
+	maxErr float64
+	rmsErr float64
+	corr   float64 // Pearson correlation; 0 when either window is constant
+}
+
+// compareAligned compares got and want sample by sample at offset 0 over
+// [start, start+n), clipped to both lengths. It fails when fewer than
+// soxrMinWindow samples remain.
+func compareAligned(got, want []float64, start, n int) (soxrStats, error) {
+	n = min(n, len(got)-start, len(want)-start)
+	if start < 0 || n < soxrMinWindow {
+		return soxrStats{}, fmt.Errorf("window of %d samples at %d is too short (got %d samples, libsoxr %d)", n, start, len(got), len(want))
 	}
 
-	// Find best alignment to account for latency differences
-	offset := findBestOffset(got, want)
-
-	// Compute aligned comparison
-	startGot := 300
-	startWant := 300
-
-	if offset > 0 {
-		startGot += offset
-	} else {
-		startWant -= offset
+	var stats soxrStats
+	var sumG, sumW, sumGW, sumGG, sumWW, sumSqErr float64
+	for i := start; i < start+n; i++ {
+		g, w := got[i], want[i]
+		e := math.Abs(g - w)
+		stats.maxErr = max(stats.maxErr, e)
+		sumSqErr += e * e
+		sumG += g
+		sumW += w
+		sumGW += g * w
+		sumGG += g * g
+		sumWW += w * w
 	}
 
-	// Number of samples to compare
-	n := 2000
-	if startGot+n > len(got) {
-		n = len(got) - startGot
+	fn := float64(n)
+	stats.rmsErr = math.Sqrt(sumSqErr / fn)
+	devG := math.Sqrt(sumGG - sumG*sumG/fn)
+	devW := math.Sqrt(sumWW - sumW*sumW/fn)
+	if devG > 0 && devW > 0 {
+		stats.corr = (sumGW - sumG*sumW/fn) / (devG * devW)
 	}
-	if startWant+n > len(want) {
-		n = len(want) - startWant
-	}
+	return stats, nil
+}
 
-	if n < 500 {
-		return 0, 0, 0, -1
-	}
-
-	// Calculate errors on aligned region
-	maxErr = 0
-	errIdx = -1
-	sumSqErr := 0.0
-	sumGot := 0.0
-	sumWant := 0.0
-	sumGotWant := 0.0
-	sumGotSq := 0.0
-	sumWantSq := 0.0
-
-	for i := range n {
-		g := got[startGot+i]
-		w := want[startWant+i]
-		err := math.Abs(g - w)
-		if err > maxErr {
-			maxErr = err
-			errIdx = startGot + i
+// sineLag returns how many output samples got trails want (positive means got
+// is late), from the phase of a single-frequency fit of freq over [start,
+// start+n). freq and rate are in Hz; rate is the output rate.
+func sineLag(got, want []float64, freq, rate float64, start, n int) float64 {
+	phase := func(x []float64) float64 {
+		var cosSum, sinSum float64
+		for i := start; i < start+n; i++ {
+			w := 2 * math.Pi * freq * float64(i) / rate
+			cosSum += x[i] * math.Cos(w)
+			sinSum += x[i] * math.Sin(w)
 		}
-		sumSqErr += err * err
-
-		sumGot += g
-		sumWant += w
-		sumGotWant += g * w
-		sumGotSq += g * g
-		sumWantSq += w * w
+		return math.Atan2(cosSum, sinSum)
 	}
+	d := math.Remainder(phase(got)-phase(want), 2*math.Pi)
+	return -d / (2 * math.Pi * freq / rate)
+}
 
-	rmsErr = math.Sqrt(sumSqErr / float64(n))
-
-	// Pearson correlation
-	meanGot := sumGot / float64(n)
-	meanWant := sumWant / float64(n)
-	numerator := sumGotWant - float64(n)*meanGot*meanWant
-	denomGot := math.Sqrt(sumGotSq - float64(n)*meanGot*meanGot)
-	denomWant := math.Sqrt(sumWantSq - float64(n)*meanWant*meanWant)
-
-	if denomGot > 0 && denomWant > 0 {
-		correlation = numerator / (denomGot * denomWant)
+// peakPos returns the position of the largest-magnitude sample, refined to a
+// fraction of a sample by a parabola through its two neighbours.
+func peakPos(x []float64) float64 {
+	k := 0
+	for i := range x {
+		if math.Abs(x[i]) > math.Abs(x[k]) {
+			k = i
+		}
 	}
-
-	return maxErr, rmsErr, correlation, errIdx
+	if k == 0 || k == len(x)-1 {
+		return float64(k)
+	}
+	y0, y1, y2 := x[k-1], x[k], x[k+1]
+	den := y0 - 2*y1 + y2
+	if den == 0 {
+		return float64(k)
+	}
+	return float64(k) + 0.5*(y0-y2)/den
 }
 
 func TestSoxrComparison_DC(t *testing.T) {
-	testCases := []struct {
-		inputRate  float64
-		outputRate float64
-	}{
+	tool := soxrReferenceTool(t)
+
+	cases := []struct{ inputRate, outputRate float64 }{
 		{44100, 48000}, // CD to DAT
 		{48000, 44100}, // DAT to CD
 		{44100, 96000}, // 2x upsample
 		{96000, 48000}, // 2x downsample
 	}
 
-	for _, tc := range testCases {
-		name := fmt.Sprintf("%.0f_to_%.0f", tc.inputRate, tc.outputRate)
-		t.Run(name, func(t *testing.T) {
-			// Get soxr reference
-			soxrOut, err := getSoxrReference(t.Context(), tc.inputRate, tc.outputRate, "dc", 0)
-			if err != nil {
-				t.Skipf("soxr reference not available: %v", err)
-			}
+	for _, p := range soxrWaveformPresets {
+		for _, tc := range cases {
+			t.Run(fmt.Sprintf("%s/%.0f_to_%.0f", p.name, tc.inputRate, tc.outputRate), func(t *testing.T) {
+				want := soxrReference(t, tool, tc.inputRate, tc.outputRate, "dc", 0, p.soxrQuality)
+				got := resampleSoxrSignal(t, p.goQuality, tc.inputRate, tc.outputRate, "dc", 0)
+				checkSoxrLength(t, got, want)
 
-			// Run our resampler
-			resampler, err := NewResampler[float64](tc.inputRate, tc.outputRate, QualityHigh)
-			if err != nil {
-				t.Fatalf("NewResampler failed: %v", err)
-			}
+				stats, err := compareAligned(got, want, soxrWindowStart, soxrWindowLen)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// No correlation for DC: it is undefined for constant windows.
+				t.Logf("samples %d/%d max error %.6f rms error %.6f", len(got), len(want), stats.maxErr, stats.rmsErr)
 
-			input := generateTestSignal("dc", tc.inputRate, 0)
-			output, err := resampler.Process(input)
-			if err != nil {
-				t.Fatalf("Process failed: %v", err)
-			}
-			flush, _ := resampler.Flush()
-			output = append(output, flush...)
-
-			// Compare
-			maxErr, rmsErr, corr, errIdx := compareOutputs(output, soxrOut)
-
-			t.Logf("Samples: got=%d, want=%d", len(output), len(soxrOut))
-			t.Logf("Max error: %.6f at index %d", maxErr, errIdx)
-			t.Logf("RMS error: %.6f", rmsErr)
-			t.Logf("Correlation: %.6f", corr)
-
-			// DC signals should have very low error
-			if maxErr > dcTolerance {
-				t.Errorf("DC max error %.6f exceeds tolerance %.6f", maxErr, dcTolerance)
-			}
-		})
+				if stats.maxErr > soxrDCMaxError {
+					t.Errorf("DC max error %.6f exceeds %.6f", stats.maxErr, soxrDCMaxError)
+				}
+			})
+		}
 	}
 }
 
 func TestSoxrComparison_Sine(t *testing.T) {
-	testCases := []struct {
-		inputRate  float64
-		outputRate float64
-		frequency  float64
-	}{
-		{44100, 48000, 1000},  // 1 kHz
-		{44100, 48000, 10000}, // 10 kHz
-		{48000, 44100, 1000},  // downsample
-		{44100, 96000, 5000},  // upsample
+	tool := soxrReferenceTool(t)
+
+	cases := []struct{ inputRate, outputRate, frequency float64 }{
+		{44100, 48000, 1000},
+		{44100, 48000, 10000},
+		{48000, 44100, 1000},
+		{44100, 96000, 5000},
 	}
 
-	for _, tc := range testCases {
-		name := fmt.Sprintf("%.0fHz_%.0f_to_%.0f", tc.frequency, tc.inputRate, tc.outputRate)
-		t.Run(name, func(t *testing.T) {
-			// Get soxr reference
-			soxrOut, err := getSoxrReference(t.Context(), tc.inputRate, tc.outputRate, "sine", tc.frequency)
-			if err != nil {
-				t.Skipf("soxr reference not available: %v", err)
-			}
+	for _, p := range soxrWaveformPresets {
+		for _, tc := range cases {
+			t.Run(fmt.Sprintf("%s/%.0fHz_%.0f_to_%.0f", p.name, tc.frequency, tc.inputRate, tc.outputRate), func(t *testing.T) {
+				want := soxrReference(t, tool, tc.inputRate, tc.outputRate, "sine", tc.frequency, p.soxrQuality)
+				got := resampleSoxrSignal(t, p.goQuality, tc.inputRate, tc.outputRate, "sine", tc.frequency)
+				checkSoxrLength(t, got, want)
 
-			// Run our resampler
-			resampler, err := NewResampler[float64](tc.inputRate, tc.outputRate, QualityHigh)
-			if err != nil {
-				t.Fatalf("NewResampler failed: %v", err)
-			}
+				stats, err := compareAligned(got, want, soxrWindowStart, soxrWindowLen)
+				if err != nil {
+					t.Fatal(err)
+				}
+				lag := sineLag(got, want, tc.frequency, tc.outputRate, soxrWindowStart, min(soxrWindowLen, len(want)-soxrWindowStart))
+				t.Logf("samples %d/%d lag %+.5f max error %.6f rms error %.6f correlation %.7f",
+					len(got), len(want), lag, stats.maxErr, stats.rmsErr, stats.corr)
 
-			input := generateTestSignal("sine", tc.inputRate, tc.frequency)
-			output, err := resampler.Process(input)
-			if err != nil {
-				t.Fatalf("Process failed: %v", err)
-			}
-			flush, _ := resampler.Flush()
-			output = append(output, flush...)
-
-			// Compare
-			maxErr, rmsErr, corr, errIdx := compareOutputs(output, soxrOut)
-
-			t.Logf("Samples: got=%d, want=%d", len(output), len(soxrOut))
-			t.Logf("Max error: %.6f at index %d", maxErr, errIdx)
-			t.Logf("RMS error: %.6f", rmsErr)
-			t.Logf("Correlation: %.6f", corr)
-
-			// Determine thresholds based on frequency
-			corrThreshold := correlationThreshold
-			errThreshold := maxErrorThreshold
-			if tc.frequency < 5000 {
-				corrThreshold = lowFreqCorrelation
-				errThreshold = lowFreqMaxError
-			}
-
-			// Correlation should be high for sine waves
-			if corr < corrThreshold {
-				t.Errorf("Sine correlation %.6f below %.2f", corr, corrThreshold)
-			}
-
-			// Max error should be reasonable (allows for filter design differences)
-			if maxErr > errThreshold {
-				t.Errorf("Sine max error %.6f exceeds tolerance %.2f", maxErr, errThreshold)
-			}
-		})
+				if math.Abs(lag) > soxrMaxLag {
+					t.Errorf("lag %+.5f output samples, want |lag| <= %.3f", lag, soxrMaxLag)
+				}
+				if stats.maxErr > soxrSineMaxError {
+					t.Errorf("max error %.6f exceeds %.6f", stats.maxErr, soxrSineMaxError)
+				}
+				if stats.corr < soxrSineMinCorr {
+					t.Errorf("correlation %.7f below %.4f", stats.corr, soxrSineMinCorr)
+				}
+			})
+		}
 	}
 }
 
+// TestSoxrComparison_Impulse pins the alignment of the impulse peak against
+// libsoxr, which is the non-periodic evidence for time alignment, and the shape
+// of the impulse response around it. The cases beyond the first two exercise
+// other stage layouts: DFT upsampling, integer decimation, and an anti-alias
+// pre-stage followed by a polyphase stage.
 func TestSoxrComparison_Impulse(t *testing.T) {
-	testCases := []struct {
-		inputRate  float64
-		outputRate float64
-	}{
+	tool := soxrReferenceTool(t)
+
+	cases := []struct{ inputRate, outputRate float64 }{
 		{44100, 48000},
 		{48000, 44100},
+		{44100, 96000},
+		{96000, 48000},
+		{48000, 32000},
 	}
 
-	for _, tc := range testCases {
-		name := fmt.Sprintf("%.0f_to_%.0f", tc.inputRate, tc.outputRate)
-		t.Run(name, func(t *testing.T) {
-			// Get soxr reference
-			soxrOut, err := getSoxrReference(t.Context(), tc.inputRate, tc.outputRate, "impulse", 0)
-			if err != nil {
-				t.Skipf("soxr reference not available: %v", err)
-			}
+	for _, p := range soxrWaveformPresets {
+		for _, tc := range cases {
+			t.Run(fmt.Sprintf("%s/%.0f_to_%.0f", p.name, tc.inputRate, tc.outputRate), func(t *testing.T) {
+				want := soxrReference(t, tool, tc.inputRate, tc.outputRate, "impulse", 0, p.soxrQuality)
+				got := resampleSoxrSignal(t, p.goQuality, tc.inputRate, tc.outputRate, "impulse", 0)
+				checkSoxrLength(t, got, want)
 
-			// Run our resampler
-			resampler, err := NewResampler[float64](tc.inputRate, tc.outputRate, QualityHigh)
-			if err != nil {
-				t.Fatalf("NewResampler failed: %v", err)
-			}
+				gotPeak, wantPeak := peakPos(got), peakPos(want)
+				// Centre the window on the libsoxr peak: its position depends on
+				// the ratio, and a fixed window can miss it.
+				start := max(0, int(wantPeak)-soxrWindowLen/2)
+				stats, err := compareAligned(got, want, start, soxrWindowLen)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("samples %d/%d peak %.4f/%.4f max error %.6f correlation %.7f",
+					len(got), len(want), gotPeak, wantPeak, stats.maxErr, stats.corr)
 
-			input := generateTestSignal("impulse", tc.inputRate, 0)
-			output, err := resampler.Process(input)
-			if err != nil {
-				t.Fatalf("Process failed: %v", err)
-			}
-			flush, _ := resampler.Flush()
-			output = append(output, flush...)
-
-			// Compare correlation (impulse response shape)
-			_, _, corr, _ := compareOutputs(output, soxrOut)
-
-			t.Logf("Samples: got=%d, want=%d", len(output), len(soxrOut))
-			t.Logf("Correlation: %.6f", corr)
-
-			// Impulse response correlation should be reasonable
-			// Note: different filter designs have different impulse responses
-			// We use a lower threshold here since impulse responses can vary significantly
-			if corr < 0.5 {
-				t.Errorf("Impulse correlation %.6f below 0.5 (filter designs differ)", corr)
-			}
-		})
+				if lag := gotPeak - wantPeak; math.Abs(lag) > soxrMaxLag {
+					t.Errorf("peak lag %+.5f output samples, want |lag| <= %.3f", lag, soxrMaxLag)
+				}
+				if stats.maxErr > soxrImpulseMaxError {
+					t.Errorf("max error %.6f exceeds %.6f", stats.maxErr, soxrImpulseMaxError)
+				}
+				if stats.corr < soxrImpulseMinCorr {
+					t.Errorf("correlation %.7f below %.4f", stats.corr, soxrImpulseMinCorr)
+				}
+			})
+		}
 	}
 }
