@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The README note on why Low shows better THD than Medium claimed that Low keeps
-  its passband to 80% of Nyquist. That describes libsoxr's LQ; at 44.1kHz to
+  its passband to 80% of Nyquist. At 44.1kHz to
   48kHz this library's Low shares Medium's 2x DFT stage and passes the same
   band, and the THD difference comes from the polyphase stage.
 
