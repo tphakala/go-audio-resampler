@@ -360,12 +360,11 @@ figures come from the bundled quality-regression suite and are reproducible with
 > **Why does Low show better THD than Medium?** Both presets are 16-bit (same noise
 > floor), so the difference is filter geometry, not precision. Medium extends the
 > passband to 90% of Nyquist with a sharper transition that leaks slightly more energy
-> near Nyquist; libsoxr's own LQ and MQ figures show the same THD ordering.
-> Here, on upsampling both presets
-> share the same 2x DFT stage, so at 44.1kHz → 48kHz Low passes the same band as
-> Medium; the THD gap comes from the polyphase stage, which Low designs from its
-> narrower passband end (0.676 of Nyquist). Low and Medium are a
-> bandwidth-versus-distortion trade, not a simple quality ranking.
+> near Nyquist; libsoxr's own LQ and MQ figures show the same THD ordering. In this
+> library both presets use the same 2x DFT stage when upsampling, so at 44.1kHz →
+> 48kHz Low passes the same band as Medium; the THD gap comes from the polyphase
+> stage, which Low designs from its narrower passband end (0.676 of Nyquist). Low and
+> Medium are a bandwidth-versus-distortion trade, not a simple quality ranking.
 
 The table above uses 44.1kHz → 48kHz, an exact-rational ratio where the polyphase filter needs no sub-phase interpolation. Ratios that do engage the sub-phase Catmull-Rom interpolation banks are pinned separately (measured 2026-07-17, guarded by `TestQualityRegression_THD_ActiveInterpolation`):
 
