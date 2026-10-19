@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (and `GetInfo().Latency`) is non-zero for them; for 48000 to 48040 it is 74
   samples at Low and Medium, 125 at High and 159 at VeryHigh. Through `New` at
   those four presets an exact 1:1 conversion still has no filter stage and a
-  `GetLatency()` of 0. (#PR)
+  `GetLatency()` of 0. (#91)
 - The README note on why Low shows better THD than Medium claimed that Low keeps
   its passband to 80% of Nyquist. At 44.1kHz to 48kHz this library's Low shares
   Medium's 2x DFT stage and passes the same band, and the THD difference comes
