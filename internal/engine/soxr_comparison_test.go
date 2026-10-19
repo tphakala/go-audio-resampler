@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -226,12 +227,18 @@ type soxrStats struct {
 }
 
 // compareAligned compares got and want sample by sample at offset 0 over
-// [start, start+n), clipped to both lengths. It fails when fewer than
-// soxrMinWindow samples remain.
-func compareAligned(got, want []float64, start, n int) (soxrStats, error) {
-	n = min(n, len(got)-start, len(want)-start)
+// [start, start+soxrWindowLen), clipped to both lengths. It fails when fewer than
+// soxrMinWindow samples remain, or when the window holds a NaN or infinite
+// sample: the error limits compare with ">", which is false for NaN.
+func compareAligned(got, want []float64, start int) (soxrStats, error) {
+	n := min(soxrWindowLen, len(got)-start, len(want)-start)
 	if start < 0 || n < soxrMinWindow {
 		return soxrStats{}, fmt.Errorf("window of %d samples at %d is too short (got %d samples, libsoxr %d)", n, start, len(got), len(want))
+	}
+	for i, g := range got[start : start+n] {
+		if math.IsNaN(g) || math.IsInf(g, 0) {
+			return soxrStats{}, fmt.Errorf("Go output sample %d is %v", start+i, g)
+		}
 	}
 
 	var stats soxrStats
@@ -260,8 +267,10 @@ func compareAligned(got, want []float64, start, n int) (soxrStats, error) {
 
 // sineLag returns how many output samples got trails want (positive means got
 // is late), from the phase of a single-frequency fit of freq over [start,
-// start+n). freq and rate are in Hz; rate is the output rate.
+// start+n), clipped to both lengths. freq and rate are in Hz; rate is the
+// output rate.
 func sineLag(got, want []float64, freq, rate float64, start, n int) float64 {
+	n = min(n, len(got)-start, len(want)-start)
 	phase := func(x []float64) float64 {
 		var cosSum, sinSum float64
 		for i := start; i < start+n; i++ {
@@ -312,7 +321,7 @@ func TestSoxrComparison_DC(t *testing.T) {
 				got := resampleSoxrSignal(t, p.goQuality, tc.inputRate, tc.outputRate, "dc", 0)
 				checkSoxrLength(t, got, want)
 
-				stats, err := compareAligned(got, want, soxrWindowStart, soxrWindowLen)
+				stats, err := compareAligned(got, want, soxrWindowStart)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -344,7 +353,7 @@ func TestSoxrComparison_Sine(t *testing.T) {
 				got := resampleSoxrSignal(t, p.goQuality, tc.inputRate, tc.outputRate, "sine", tc.frequency)
 				checkSoxrLength(t, got, want)
 
-				stats, err := compareAligned(got, want, soxrWindowStart, soxrWindowLen)
+				stats, err := compareAligned(got, want, soxrWindowStart)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -393,7 +402,7 @@ func TestSoxrComparison_Impulse(t *testing.T) {
 				// Centre the window on the libsoxr peak: its position depends on
 				// the ratio, and a fixed window can miss it.
 				start := max(0, int(wantPeak)-soxrWindowLen/2)
-				stats, err := compareAligned(got, want, start, soxrWindowLen)
+				stats, err := compareAligned(got, want, start)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -412,4 +421,37 @@ func TestSoxrComparison_Impulse(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestSoxrCompareHelpers_RejectBadOutput pins that the comparison helpers fail
+// on a broken Go output instead of passing or panicking, without needing the
+// libsoxr tool.
+func TestSoxrCompareHelpers_RejectBadOutput(t *testing.T) {
+	const n = soxrWindowStart + soxrWindowLen
+	want := make([]float64, n)
+	for i := range want {
+		want[i] = math.Sin(2 * math.Pi * 1000 * float64(i) / 48000)
+	}
+
+	t.Run("NonFinite", func(t *testing.T) {
+		for _, bad := range []float64{math.NaN(), math.Inf(1)} {
+			got := slices.Clone(want)
+			got[soxrWindowStart+1] = bad
+			if _, err := compareAligned(got, want, soxrWindowStart); err == nil {
+				t.Errorf("compareAligned accepted a window containing %v", bad)
+			}
+		}
+	})
+
+	t.Run("ShortOutput", func(t *testing.T) {
+		// A Go output shorter than libsoxr's but long enough for
+		// compareAligned must not make sineLag index past its end.
+		got := want[:soxrWindowStart+soxrMinWindow]
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("sineLag panicked on a short output: %v", r)
+			}
+		}()
+		sineLag(got, want, 1000, 48000, soxrWindowStart, soxrWindowLen)
+	})
 }
