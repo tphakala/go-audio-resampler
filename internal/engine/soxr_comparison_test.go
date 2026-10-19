@@ -228,16 +228,17 @@ type soxrStats struct {
 
 // compareAligned compares got and want sample by sample at offset 0 over
 // [start, start+soxrWindowLen), clipped to both lengths. It fails when fewer than
-// soxrMinWindow samples remain, or when the window holds a NaN or infinite
-// sample: the error limits compare with ">", which is false for NaN.
+// soxrMinWindow samples remain, or when any Go output sample, inside the
+// window or not, is NaN or infinite: the error limits compare with ">", which
+// is false for NaN.
 func compareAligned(got, want []float64, start int) (soxrStats, error) {
 	n := min(soxrWindowLen, len(got)-start, len(want)-start)
 	if start < 0 || n < soxrMinWindow {
 		return soxrStats{}, fmt.Errorf("window of %d samples at %d is too short (got %d samples, libsoxr %d)", n, start, len(got), len(want))
 	}
-	for i, g := range got[start : start+n] {
+	for i, g := range got {
 		if math.IsNaN(g) || math.IsInf(g, 0) {
-			return soxrStats{}, fmt.Errorf("Go output sample %d is %v", start+i, g)
+			return soxrStats{}, fmt.Errorf("Go output sample %d is %v", i, g)
 		}
 	}
 
@@ -433,11 +434,15 @@ func TestSoxrCompareHelpers_RejectBadOutput(t *testing.T) {
 	}
 
 	t.Run("NonFinite", func(t *testing.T) {
-		for _, bad := range []float64{math.NaN(), math.Inf(1)} {
-			got := slices.Clone(want)
-			got[soxrWindowStart+1] = bad
-			if _, err := compareAligned(got, want, soxrWindowStart); err == nil {
-				t.Errorf("compareAligned accepted a window containing %v", bad)
+		// Inside the window, in the startup samples before it, and in a tail
+		// sample past libsoxr's length.
+		for _, at := range []int{soxrWindowStart + 1, 0, n} {
+			for _, bad := range []float64{math.NaN(), math.Inf(1)} {
+				got := append(slices.Clone(want), 0)
+				got[at] = bad
+				if _, err := compareAligned(got, want, soxrWindowStart); err == nil {
+					t.Errorf("compareAligned accepted %v at sample %d", bad, at)
+				}
 			}
 		}
 	})
