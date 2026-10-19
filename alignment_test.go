@@ -48,6 +48,10 @@ var alignRatios = [][2]float64{
 	{96000, 64000},   // anti-alias pre-stage plus polyphase
 	{44100, 16000},   // anti-alias pre-stage, long filter
 	{48000, 48000},   // unity
+	{48000, 48040},   // near unity, issue #78
+	{48000, 47960},   // near unity, downsampling, issue #78
+	{48000, 96080},   // just past 2x, remainder near unity
+	{48000, 23990},   // just below 0.5x, remainder near unity
 }
 
 var alignPresets = []QualityPreset{QualityQuick, QualityLow, QualityMedium, QualityHigh, QualityVeryHigh}

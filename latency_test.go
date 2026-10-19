@@ -170,6 +170,10 @@ func TestGetLatency_ConfigPath_MatchesMeasuredDeficit(t *testing.T) {
 		{384000, 256000},
 		{48000, 32000},
 		{48000, 16000},
+		{48000, 48040}, // near unity, issue #78
+		{48000, 47960},
+		{48000, 96080}, // just past 2x, remainder near unity
+		{48000, 23990}, // just below 0.5x, remainder near unity
 	} {
 		for _, preset := range []QualityPreset{QualityQuick, QualityLow, QualityMedium, QualityHigh, QualityVeryHigh} {
 			cfg := Config{

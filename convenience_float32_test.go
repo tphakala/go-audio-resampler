@@ -494,6 +494,7 @@ func TestProcessFloat32Into_MatchesProcessFloat32(t *testing.T) {
 		{48000, 44100},
 		{96000, 48000},
 		{16000, 48000},
+		{48000, 47960}, // near unity: EstimateOutput must bound the output (issue #78)
 	}
 	for _, rp := range ratePairs {
 		name := fmt.Sprintf("%gto%g", rp.inRate, rp.outRate)

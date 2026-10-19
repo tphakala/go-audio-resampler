@@ -204,6 +204,9 @@ func TestStreamingEquivalence_RandomChunkPlans(t *testing.T) {
 		{48000, 44100},
 		{44100, 16000},
 		{96000, 22050},
+		{48000, 48040}, // near-unity polyphase stage alone
+		{48000, 96080}, // half-band stage, then near-unity remainder
+		{48000, 23990}, // half-band decimation, then near-unity remainder
 	}
 	const plansPerRow = 20
 	for _, rr := range rows {

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `New` no longer drops the rate change for conversions within 0.1% of 1:1 or
+  of a power-of-two ratio at the Low, Medium, High and VeryHigh presets (for
+  example 48000 to 47999, 48000 to 48040, 44100 to 44110, 48000 to 96050 and
+  48000 to 23990). The pipeline skipped their final filter stage, so the output
+  kept the input's length (or exactly twice or half of it) and was not time
+  aligned, and on near-unity downsampling a large `ProcessInto` or
+  `ProcessFloat32Into` call sized by `EstimateOutput` panicked. These
+  conversions now get a filter stage, as `NewEngine` and the Quick preset
+  already did, so their output length follows the ratio and `GetLatency()`
+  (and `GetInfo().Latency`) is non-zero for them; for 48000 to 48040 it is 74
+  samples at Low and Medium, 125 at High and 159 at VeryHigh. An exact 1:1
+  conversion is still a zero-latency passthrough. (#PR)
 - The README note on why Low shows better THD than Medium claimed that Low keeps
   its passband to 80% of Nyquist. At 44.1kHz to 48kHz this library's Low shares
   Medium's 2x DFT stage and passes the same band, and the THD difference comes
