@@ -42,7 +42,7 @@ tasks:
       - '{{.RESAMPLE_DEMO}}'
 
   build:soxr-ref:
-    desc: Build soxr reference tools (requires libsoxr)
+    desc: Build soxr reference tools (requires libsoxr and fftw3)
     dir: ./test-reference
     cmds:
       - make
@@ -74,7 +74,7 @@ tasks:
     desc: Run soxr comparison tests
     deps: [build:soxr-ref]
     cmds:
-      - go test -v ./internal/engine/... -run Soxr
+      - go test -count=1 -v ./internal/engine/... -run Soxr
 
   # Benchmark tasks
   bench:

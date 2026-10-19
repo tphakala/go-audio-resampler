@@ -40,6 +40,30 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+  soxr:
+    name: libsoxr comparison
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          check-latest: true
+      - name: Install libsoxr and fftw3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsoxr-dev libfftw3-dev
+      - name: Build reference tools
+        run: make -C test-reference
+      - name: Run libsoxr comparison tests
+        shell: bash
+        run: |
+          go test -count=1 -v -run Soxr ./internal/engine | tee soxr-test.log
+          if grep -q -- '--- SKIP' soxr-test.log; then
+            echo "::error::libsoxr comparison tests skipped; check the reference tool build"
+            exit 1
+          fi
+
   race:
     name: Race Detection
     runs-on: ubuntu-latest

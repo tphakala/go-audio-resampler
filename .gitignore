@@ -34,6 +34,9 @@ Thumbs.db
 /dist/
 /resample-wav
 /test-reference/test_quality
+/test-reference/test_soxr_reference
+/test-reference/test_antialiasing
+/test-reference/bench_soxr
 
 # Debug files
 *.log
