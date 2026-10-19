@@ -377,9 +377,8 @@ func TestSoxrComparison_Sine(t *testing.T) {
 
 // TestSoxrComparison_Impulse pins the alignment of the impulse peak against
 // libsoxr, which is the non-periodic evidence for time alignment, and the shape
-// of the impulse response around it. The cases beyond the first two exercise
-// other stage layouts: DFT upsampling, integer decimation, and an anti-alias
-// pre-stage followed by a polyphase stage.
+// of the impulse response around it. The other cases add a larger upsampling
+// ratio, integer decimation and a 3:2 downsampling ratio.
 func TestSoxrComparison_Impulse(t *testing.T) {
 	tool := soxrReferenceTool(t)
 
