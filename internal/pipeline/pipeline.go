@@ -152,7 +152,7 @@ func BuildPipeline(ratio float64, quality QualityParams) (*Pipeline, error) {
 	}
 
 	// Handle remaining ratio with polyphase or FFT
-	if math.Abs(remainingRatio-1.0) > ratioTolerance {
+	if math.Abs(remainingRatio-1.0) >= unityRatioTolerance {
 		// Choose between polyphase and FFT based on ratio and quality
 		if shouldUseFFT(remainingRatio, quality) {
 			// FFT-based resampling for high-quality or exact ratios

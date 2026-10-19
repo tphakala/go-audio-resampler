@@ -33,9 +33,15 @@ const (
 const (
 	halfRatio         = 0.5    // Half-band decimation ratio
 	doubleRatio       = 2.0    // Half-band interpolation ratio
-	ratioTolerance    = 0.001  // Tolerance for ratio comparison
 	ratioToleranceFFT = 0.0001 // Tighter tolerance for FFT selection
 )
+
+// unityRatioTolerance is how close the ratio left after the power-of-two
+// half-band stages must be to 1 for BuildPipeline to add no final stage.
+// Ratios within 1e-9 of 1 count as equal, which covers float rounding in the
+// ratio. A wider window drops a real rate change; 0.001 dropped up to 48
+// samples per second at 48 kHz (issue #78).
+const unityRatioTolerance = 1e-9
 
 // Pipeline stage capacities and sizes
 const (

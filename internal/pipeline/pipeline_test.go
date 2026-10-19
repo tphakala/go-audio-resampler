@@ -153,6 +153,28 @@ func TestBuildPipeline(t *testing.T) {
 			expectError:   false,
 			expectedTypes: []StageType{},
 		},
+		{
+			name:  "ratio within 1e-9 of 1 (no-op)",
+			ratio: 1 + 5e-10,
+			quality: QualityParams{
+				Precision:     16,
+				PassbandEnd:   0.45,
+				StopbandBegin: 0.5,
+			},
+			expectError:   false,
+			expectedTypes: []StageType{},
+		},
+		{
+			name:  "ratio just outside 1e-9 of 1 gets a stage",
+			ratio: 1 + 2e-9,
+			quality: QualityParams{
+				Precision:     16,
+				PassbandEnd:   0.45,
+				StopbandBegin: 0.5,
+			},
+			expectError:   false,
+			expectedTypes: []StageType{StagePolyphase},
+		},
 	}
 
 	for _, tt := range tests {
