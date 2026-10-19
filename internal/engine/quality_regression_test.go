@@ -27,14 +27,16 @@ const (
 	// DC gain must be within this tolerance of 1.0
 	regressionDCGainTolerance = 0.001
 
-	// Maximum passband ripple in dB (peak-to-peak)
-	// Calibrated: actual performance is ~1.3 dB for fractional ratios (polyphase)
-	//             Quick quality uses cubic interpolation: ~5.1 dB (matches SOXR)
-	regressionMaxRippleQuick    = 5.5 // Quick quality (cubic interpolation)
-	regressionMaxRippleLow      = 2.0 // Low quality
-	regressionMaxRippleMedium   = 2.0 // Medium quality
-	regressionMaxRippleHigh     = 2.0 // High quality
-	regressionMaxRippleVeryHigh = 2.0 // Very high quality
+	// Maximum passband ripple in dB (peak-to-peak gain spread of 20 tones over
+	// the preset's own passband, see measurePassbandRipple).
+	// Measured 2026-10-19 with that definition: 44.1k to 48k VeryHigh 0.00016,
+	// High 0.00139, Medium 0.00269, Low 0.00004, Quick 1.927 dB (cubic droop
+	// at 0.676 of Nyquist); 48k to 44.1k VeryHigh 0.00000, Low 0.00008.
+	regressionMaxRippleQuick    = 2.0  // Quick quality (cubic interpolation)
+	regressionMaxRippleLow      = 0.01 // Low quality
+	regressionMaxRippleMedium   = 0.01 // Medium quality
+	regressionMaxRippleHigh     = 0.01 // High quality
+	regressionMaxRippleVeryHigh = 0.01 // Very high quality
 
 	// Maximum THD at 1kHz test frequency (more negative = better)
 	// Calibrated: VeryHigh achieves -140 to -190 dB, Quick ~-89 dB
@@ -246,7 +248,8 @@ func TestQualityRegression_SNR(t *testing.T) {
 	}
 }
 
-// TestQualityRegression_Passband verifies passband ripple hasn't regressed
+// TestQualityRegression_Passband verifies passband ripple hasn't regressed,
+// over each preset's own passband (qualityToPassbandEnd).
 func TestQualityRegression_Passband(t *testing.T) {
 	testCases := []struct {
 		inputRate  float64
@@ -260,13 +263,20 @@ func TestQualityRegression_Passband(t *testing.T) {
 		{44100, 48000, QualityHigh, regressionMaxRippleHigh},
 		{44100, 48000, QualityMedium, regressionMaxRippleMedium},
 		{44100, 48000, QualityLow, regressionMaxRippleLow},
+		// Low's anti-alias path: TestPassbandEdge_NonIntegerDownsampling_MatchesDecimationPath
+		// skips its flatness loop for Low, so this row is the only flatness pin there.
+		{48000, 44100, QualityLow, regressionMaxRippleLow},
 		{44100, 48000, QualityQuick, regressionMaxRippleQuick},
 	}
 
 	for _, tc := range testCases {
 		name := qualityName(tc.quality) + "/" + formatRatio(tc.inputRate, tc.outputRate)
 		t.Run(name, func(t *testing.T) {
-			ripple := measurePassbandRippleInternal(t, tc.inputRate, tc.outputRate, tc.quality)
+			res, err := measurePassbandRipple(tc.inputRate, tc.outputRate, tc.quality, qualityToPassbandEnd(tc.quality))
+			if err != nil {
+				t.Fatalf("measurePassbandRipple failed: %v", err)
+			}
+			ripple := res.RipplePeakPeak
 
 			if ripple > tc.maxRipple {
 				t.Errorf("PASSBAND REGRESSION: ripple %.4f dB, want <= %.4f dB", ripple, tc.maxRipple)
@@ -475,85 +485,4 @@ func measureSNRInternal(t *testing.T, inputRate, outputRate, testFreq float64, q
 	signalDB := 10 * math.Log10(signalPower+1e-20)
 	noiseDB := 10 * math.Log10(noisePower+1e-20)
 	return signalDB - noiseDB
-}
-
-func measurePassbandRippleInternal(t *testing.T, inputRate, outputRate float64, quality Quality) float64 {
-	t.Helper()
-
-	numSamples := 65536
-	fftSize := 16384
-
-	// Determine passband limit
-	origNyquist := math.Min(inputRate, outputRate) / 2.0
-	passbandEnd := origNyquist * 0.9
-
-	// Generate multitone signal
-	numFreqs := 20
-	testFreqs := make([]float64, 0, numFreqs)
-	for f := 500.0; f < passbandEnd && len(testFreqs) < numFreqs; f += passbandEnd / float64(numFreqs) {
-		testFreqs = append(testFreqs, f)
-	}
-
-	input := make([]float64, numSamples)
-	amp := 0.05
-	for _, freq := range testFreqs {
-		for i := range input {
-			phase := 2.0 * math.Pi * freq * float64(i) / inputRate
-			input[i] += amp * math.Sin(phase)
-		}
-	}
-
-	resampler, err := NewResampler[float64](inputRate, outputRate, quality)
-	if err != nil {
-		t.Fatalf("NewResampler failed: %v", err)
-	}
-
-	output, _ := resampler.Process(input)
-	flush, _ := resampler.Flush()
-	output = append(output, flush...)
-
-	// Compute FFT
-	fftIn := make([]complex128, fftSize)
-	for i := 0; i < fftSize && i < len(output); i++ {
-		window := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
-		fftIn[i] = complex(output[i]*window, 0)
-	}
-
-	fftOut := fft(fftIn)
-
-	// Measure levels at each frequency
-	levels := make([]float64, 0, len(testFreqs))
-	sum := 0.0
-	for _, freq := range testFreqs {
-		bin := int(freq / outputRate * float64(fftSize))
-		peak := -200.0
-		for b := -2; b <= 2; b++ {
-			if bin+b > 0 && bin+b < len(fftOut)/2 {
-				mag := cmplx.Abs(fftOut[bin+b])
-				magDB := 20 * math.Log10(mag+1e-20)
-				if magDB > peak {
-					peak = magDB
-				}
-			}
-		}
-		levels = append(levels, peak)
-		sum += peak
-	}
-
-	avg := sum / float64(len(testFreqs))
-
-	// Calculate peak-to-peak ripple
-	maxDev := -math.MaxFloat64
-	minDev := math.MaxFloat64
-	for _, level := range levels {
-		dev := level - avg
-		if dev > maxDev {
-			maxDev = dev
-		}
-		if dev < minDev {
-			minDev = dev
-		}
-	}
-
-	return maxDev - minDev
 }
