@@ -86,7 +86,7 @@ Tests run without audio hardware. Tests that need libsoxr reference data skip wh
 
 ## Commands
 
-Go version is read from `go.mod` (currently 1.27.0). CI pins golangci-lint in `.github/workflows/ci.yml` (currently v2.14.0); use the same major version locally.
+Go version is read from `go.mod` (currently 1.27.0). CI pins golangci-lint in `.github/workflows/ci.yml` (currently v2.15.0); use the same major version locally.
 
 ```
 task build         # build resample-wav and the demo into ./bin (GOAMD64=v3)
