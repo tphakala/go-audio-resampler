@@ -19,6 +19,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/tphakala/go-audio-resampler/internal/testutil"
 )
 
 // =============================================================================
@@ -70,45 +72,71 @@ const (
 	qualityTestSamples = 65536 // Larger sample for better frequency resolution
 )
 
+// Passband ripple measurement parameters. test-reference/test_quality.c
+// (measure_ripple) uses the same values; change both together.
+const (
+	// rippleNumTones is the number of tones in the multitone input.
+	rippleNumTones = 20
+	// rippleLowestHz is the lowest tone frequency.
+	rippleLowestHz = 500.0
+	// rippleToneAmp is the amplitude of each tone, low enough that the sum of
+	// all of them stays clear of clipping.
+	rippleToneAmp = 0.05
+	// rippleReferenceBand is the band, as a fraction of the lower Nyquist, of
+	// the tool's plain "ripple" mode and of the committed ripple_* entries in
+	// testdata/soxr_reference_data.json. It lies inside VeryHigh's passband
+	// (0.913).
+	rippleReferenceBand = 0.9
+	// rippleSoxrToleranceDB is how much wider than libsoxr's the Go
+	// peak-to-peak passband gain spread may be. Measured Go spread is at most
+	// 0.003 dB for the filter presets, libsoxr's is 0.008 (HQ) to 0.22 dB (MQ).
+	rippleSoxrToleranceDB = 0.05
+)
+
 // =============================================================================
 // TEST 1: Passband Ripple / Frequency Response Flatness
 // =============================================================================
 
-// PassbandRippleResult holds passband flatness measurement
+// PassbandRippleResult holds passband flatness measurement. All levels are
+// gains in dB re 0 dB (the input tone amplitude).
 type PassbandRippleResult struct {
 	InputRate      float64
 	OutputRate     float64
-	MaxDeviation   float64 // Maximum deviation from 0 dB in passband
-	MinDeviation   float64 // Minimum deviation from 0 dB in passband
-	RipplePeakPeak float64 // Peak-to-peak ripple in dB
+	MaxDeviation   float64 // Largest tone gain in dB re 0 dB
+	MinDeviation   float64 // Smallest tone gain in dB re 0 dB
+	RipplePeakPeak float64 // MaxDeviation - MinDeviation, in dB
 	Frequencies    []float64
-	Response       []float64 // Frequency response in dB
+	Response       []float64 // Per-tone gain in dB re 0 dB
 }
 
-// measurePassbandRipple measures frequency response flatness in passband
-// Uses multitone test signal for accurate frequency response measurement
-func measurePassbandRipple(inputRate, outputRate float64, quality Quality) (*PassbandRippleResult, error) {
-	numSamples := qualityTestSamples
-	fftSize := 16384
+// measurePassbandRipple measures the passband gain flatness of a one-shot
+// resample. The input is 20 equal-amplitude tones from 500 Hz to
+// bandFrac * min(inputRate, outputRate) / 2, spaced evenly with the last tone
+// exactly at the band end. Each tone's gain is read with testutil.ToneLevelDB
+// from the middle of the output (outside the start-up and flush transients)
+// and referenced to the input amplitude. RipplePeakPeak is the largest minus
+// the smallest gain.
+//
+// test-reference/test_quality.c measure_ripple implements the same definition
+// for libsoxr. A change here changes both, and means regenerating the ripple_*
+// entries of testdata/soxr_reference_data.json.
+func measurePassbandRipple(inputRate, outputRate float64, quality Quality, bandFrac float64) (*PassbandRippleResult, error) {
+	hi := bandFrac * math.Min(inputRate, outputRate) / 2.0
+	if !(hi > rippleLowestHz) {
+		return nil, fmt.Errorf("band end %.1f Hz is not above the lowest tone %.0f Hz", hi, rippleLowestHz)
+	}
 
-	// Determine passband limits
-	origNyquist := math.Min(inputRate, outputRate) / 2.0
-	passbandEnd := origNyquist * 0.9 // 90% of lower Nyquist
-
-	// Generate test frequencies (20 tones across passband)
-	numFreqs := 20
-	testFreqs := make([]float64, 0, numFreqs)
-	for f := 500.0; f < passbandEnd && len(testFreqs) < numFreqs; f += passbandEnd / float64(numFreqs) {
-		testFreqs = append(testFreqs, f)
+	testFreqs := make([]float64, rippleNumTones)
+	for k := range testFreqs {
+		testFreqs[k] = rippleLowestHz + float64(k)*(hi-rippleLowestHz)/float64(rippleNumTones-1)
 	}
 
 	// Generate multitone input signal
-	input := make([]float64, numSamples)
-	amp := 0.05 // Low amplitude to avoid clipping
+	input := make([]float64, qualityTestSamples)
 	for _, freq := range testFreqs {
 		for i := range input {
 			phase := 2.0 * math.Pi * freq * float64(i) / inputRate
-			input[i] += amp * math.Sin(phase)
+			input[i] += rippleToneAmp * math.Sin(phase)
 		}
 	}
 
@@ -129,63 +157,35 @@ func measurePassbandRipple(inputRate, outputRate float64, quality Quality) (*Pas
 	}
 	output = append(output, flush...)
 
-	// Compute FFT of output
-	fftIn := make([]complex128, fftSize)
-	for i := 0; i < len(output) && i < fftSize; i++ {
-		// Apply Hann window
-		window := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
-		fftIn[i] = complex(output[i]*window, 0)
-	}
-
-	fftOut := fft(fftIn)
-
-	// Measure level at each test frequency
-	levels := make([]float64, len(testFreqs))
-	sum := 0.0
+	// Gain of each tone in dB re 0 dB. ToneLevelDB returns -Inf for an output
+	// that is too short to analyse, which would turn into NaN below and pass
+	// every threshold check, so reject it here.
+	refDB := 20 * math.Log10(rippleToneAmp)
+	gains := make([]float64, len(testFreqs))
+	maxGain := math.Inf(-1)
+	minGain := math.Inf(1)
 	for i, freq := range testFreqs {
-		bin := int(freq / outputRate * float64(fftSize))
-		// Find peak in ±2 bins around expected
-		peak := -200.0
-		for b := -2; b <= 2; b++ {
-			if bin+b > 0 && bin+b < len(fftOut)/2 {
-				mag := cmplx.Abs(fftOut[bin+b])
-				magDB := 20 * math.Log10(mag+1e-20)
-				if magDB > peak {
-					peak = magDB
-				}
-			}
+		gains[i] = testutil.ToneLevelDB(output, outputRate, freq) - refDB
+		if math.IsNaN(gains[i]) || math.IsInf(gains[i], 0) {
+			return nil, fmt.Errorf("tone %.1f Hz has no finite level (output has %d samples)", freq, len(output))
 		}
-		levels[i] = peak
-		sum += peak
-	}
-
-	avg := sum / float64(len(testFreqs))
-
-	// Measure deviation from average
-	maxDev := -math.MaxFloat64
-	minDev := math.MaxFloat64
-	for _, level := range levels {
-		dev := level - avg
-		if dev > maxDev {
-			maxDev = dev
-		}
-		if dev < minDev {
-			minDev = dev
-		}
+		maxGain = math.Max(maxGain, gains[i])
+		minGain = math.Min(minGain, gains[i])
 	}
 
 	return &PassbandRippleResult{
 		InputRate:      inputRate,
 		OutputRate:     outputRate,
-		MaxDeviation:   maxDev,
-		MinDeviation:   minDev,
-		RipplePeakPeak: maxDev - minDev,
+		MaxDeviation:   maxGain,
+		MinDeviation:   minGain,
+		RipplePeakPeak: maxGain - minGain,
 		Frequencies:    testFreqs,
-		Response:       levels,
+		Response:       gains,
 	}, nil
 }
 
-// TestPassbandRipple_CompareWithSoxr compares passband flatness
+// TestPassbandRipple_CompareWithSoxr compares passband flatness over
+// rippleReferenceBand of the lower Nyquist, at VeryHigh.
 func TestPassbandRipple_CompareWithSoxr(t *testing.T) {
 	testCases := []struct {
 		inputRate  float64
@@ -210,7 +210,7 @@ func TestPassbandRipple_CompareWithSoxr(t *testing.T) {
 			}
 
 			// Get Go result
-			goResult, err := measurePassbandRipple(tc.inputRate, tc.outputRate, QualityVeryHigh)
+			goResult, err := measurePassbandRipple(tc.inputRate, tc.outputRate, QualityVeryHigh, rippleReferenceBand)
 			if err != nil {
 				t.Fatalf("measurePassbandRipple failed: %v", err)
 			}
@@ -232,13 +232,9 @@ func TestPassbandRipple_CompareWithSoxr(t *testing.T) {
 			rippleDiff := goResult.RipplePeakPeak - soxrResult.RipplePeakPeak
 			t.Logf("Ripple difference: %.4f dB (go - soxr)", rippleDiff)
 
-			if rippleDiff > 0.5 {
-				t.Logf("WARNING: Go has %.4f dB more passband ripple than soxr", rippleDiff)
-			}
-
-			// Fail if Go ripple is significantly worse (> 1 dB more than soxr)
-			if rippleDiff > 1.0 {
-				t.Errorf("PASSBAND RIPPLE GAP: Go has %.4f dB more ripple than soxr", rippleDiff)
+			if rippleDiff > rippleSoxrToleranceDB {
+				t.Errorf("PASSBAND RIPPLE GAP: Go has %.4f dB more ripple than soxr (tolerance: %.2f dB)",
+					rippleDiff, rippleSoxrToleranceDB)
 			}
 		})
 	}

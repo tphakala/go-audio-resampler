@@ -358,13 +358,14 @@ figures come from the bundled quality-regression suite and are reproducible with
 - Downsampling removes content above the output Nyquist: alias rejection meets the stopband of the preset's filter on integer and non-integer ratios (`VeryHigh` through `NewEngine*` is the High filter), up to the ratio limit given under [Downsampling anti-aliasing](#downsampling-anti-aliasing); `QualityQuick` and 8-bit precision on `New` do not anti-alias
 
 > **Why does Low show better THD than Medium?** Both presets are 16-bit (same noise
-> floor), so the difference is filter geometry, not precision. Low keeps its passband
-> to 80% of Nyquist with a wide, gentle transition, which is easy to realize cleanly
-> and yields excellent THD, but discards more high-frequency content. Medium extends
-> the passband to 90% of Nyquist with a sharper transition: it preserves more bandwidth
-> but leaks slightly more energy near Nyquist, so its single-tone THD is higher. Low
-> and Medium are a bandwidth-versus-distortion trade, not a simple quality ranking, and
-> libsoxr's own LQ/MQ recipes show the same ordering.
+> floor), so the difference is filter geometry, not precision. libsoxr's LQ keeps its
+> passband to about 80% of Nyquist with a wide, gentle transition, and MQ extends it
+> to about 90% with a sharper one that leaks slightly more energy near Nyquist;
+> libsoxr's own figures show the same THD ordering. Here, on upsampling both presets
+> share the same 2x DFT stage, so at 44.1kHz → 48kHz Low passes the same band as
+> Medium; the THD gap comes from the polyphase stage, which Low designs from its
+> narrower passband end (0.676 of Nyquist). Low and Medium are a
+> bandwidth-versus-distortion trade, not a simple quality ranking.
 
 The table above uses 44.1kHz → 48kHz, an exact-rational ratio where the polyphase filter needs no sub-phase interpolation. Ratios that do engage the sub-phase Catmull-Rom interpolation banks are pinned separately (measured 2026-07-17, guarded by `TestQualityRegression_THD_ActiveInterpolation`):
 

@@ -105,7 +105,7 @@ task check         # fmt, vet, lint, test
 task release:check # tidy, check, race tests
 ```
 
-Run `task check` before pushing. CI runs: lint; tests on Linux, macOS and Windows; `go test -race -short`; build of the library and both CLIs plus a `go mod tidy` cleanliness check; a Linux job that builds the libsoxr reference tools and runs the `Soxr` comparison tests, failing if any of them skips; coverage upload; CodeQL; govulncheck; OpenSSF Scorecard; and the PR benchmark comparison. CONTRIBUTING.md describes the PR workflow.
+Run `task check` before pushing. CI runs: lint; tests on Linux, macOS and Windows; `go test -race -short`; build of the library and both CLIs plus a `go mod tidy` cleanliness check; a Linux job that builds the libsoxr reference tools and runs the `Soxr` comparison tests and the per-preset THD, SNR and passband ripple comparisons, failing if any of them skips; coverage upload; CodeQL; govulncheck; OpenSSF Scorecard; and the PR benchmark comparison. CONTRIBUTING.md describes the PR workflow.
 
 ## Conventions
 

@@ -221,6 +221,10 @@ func TestSNR_AllQualityPresets(t *testing.T) {
 // TEST: Passband Ripple across all quality presets
 // =============================================================================
 
+// TestPassbandRipple_AllQualityPresets compares each preset's passband gain
+// spread with libsoxr's over that preset's own passband (qualityToPassbandEnd),
+// not over a fixed fraction of Nyquist: tones in a preset's transition band
+// would measure its roll-off shape, not ripple.
 func TestPassbandRipple_AllQualityPresets(t *testing.T) {
 	testCases := []struct {
 		inputRate  float64
@@ -236,33 +240,38 @@ func TestPassbandRipple_AllQualityPresets(t *testing.T) {
 		for _, tc := range testCases {
 			testName := fmt.Sprintf("%s/%s", preset.name, tc.name)
 			t.Run(testName, func(t *testing.T) {
-				// Get SOXR reference
+				band := qualityToPassbandEnd(preset.goQuality)
+
+				// Get SOXR reference over the same band
 				soxrResult, err := runSoxrQualityTestWithPreset(t.Context(), tc.inputRate, tc.outputRate,
-					"ripple", preset.soxrQuality)
+					"ripple:"+strconv.FormatFloat(band, 'g', -1, 64), preset.soxrQuality)
 				if err != nil {
 					t.Skipf("soxr reference not available: %v", err)
 				}
+				soxrRipple, ok := soxrResult["ripple"]
+				if !ok || math.IsNaN(soxrRipple) || math.IsInf(soxrRipple, 0) {
+					t.Fatalf("soxr tool returned no finite ripple: %v", soxrResult)
+				}
 
 				// Get Go result
-				goResult, err := measurePassbandRipple(tc.inputRate, tc.outputRate, preset.goQuality)
+				goResult, err := measurePassbandRipple(tc.inputRate, tc.outputRate, preset.goQuality, band)
 				if err != nil {
 					t.Fatalf("measurePassbandRipple failed: %v", err)
 				}
 
-				soxrRipple := soxrResult["ripple"]
-
-				t.Logf("=== Passband Ripple Comparison (%s) ===", preset.name)
+				t.Logf("=== Passband Ripple Comparison (%s, band %.5f of Nyquist) ===", preset.name, band)
 				t.Logf("Conversion: %.0f Hz -> %.0f Hz", tc.inputRate, tc.outputRate)
-				t.Logf("SOXR %s: %.4f dB", preset.name, soxrRipple)
-				t.Logf("Go %s:   %.4f dB", preset.name, goResult.RipplePeakPeak)
+				t.Logf("SOXR %s: %.4f dB (max %.4f, min %.4f)", preset.name, soxrRipple,
+					soxrResult["max_deviation"], soxrResult["min_deviation"])
+				t.Logf("Go %s:   %.4f dB (max %.4f, min %.4f)", preset.name, goResult.RipplePeakPeak,
+					goResult.MaxDeviation, goResult.MinDeviation)
 
 				diff := goResult.RipplePeakPeak - soxrRipple
 				t.Logf("Difference: %.4f dB (positive = Go worse)", diff)
 
-				// Ripple tolerance - should be relatively close
-				tolerance := 2.0 // dB
+				tolerance := rippleSoxrToleranceDB
 				if diff > tolerance {
-					t.Errorf("RIPPLE GAP: Go %s has %.4f dB more ripple than SOXR (tolerance: %.1f dB)",
+					t.Errorf("RIPPLE GAP: Go %s has %.4f dB more ripple than SOXR (tolerance: %.2f dB)",
 						preset.name, diff, tolerance)
 				}
 			})

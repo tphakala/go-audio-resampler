@@ -10,29 +10,29 @@
   },
   "quality": {
     "ripple_44100_48000": {
-      "ripple": 1.323845,
-      "max_dev": 0.462183,
-      "min_dev": -0.861662
+      "ripple": 0.00558,
+      "max_dev": 2e-06,
+      "min_dev": -0.005578
     },
     "ripple_48000_44100": {
-      "ripple": 1.312032,
-      "max_dev": 0.445423,
-      "min_dev": -0.866609
+      "ripple": 0.002062,
+      "max_dev": 3e-06,
+      "min_dev": -0.002059
     },
     "ripple_48000_96000": {
-      "ripple": 1.381138,
-      "max_dev": 0.498782,
-      "min_dev": -0.882356
+      "ripple": 4e-06,
+      "max_dev": -0.0,
+      "min_dev": -5e-06
     },
     "ripple_96000_48000": {
-      "ripple": 1.384126,
-      "max_dev": 0.462928,
-      "min_dev": -0.921198
+      "ripple": 0.0,
+      "max_dev": -0.0,
+      "min_dev": -0.0
     },
     "ripple_48000_32000": {
-      "ripple": 1.310118,
-      "max_dev": 0.461617,
-      "min_dev": -0.848501
+      "ripple": 2e-06,
+      "max_dev": -1e-06,
+      "min_dev": -3e-06
     },
     "thd_44100_48000_1000": {
       "thd_db": -162.223015,

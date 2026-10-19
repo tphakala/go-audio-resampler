@@ -58,7 +58,7 @@ jobs:
       - name: Run libsoxr comparison tests
         shell: bash
         run: |
-          go test -count=1 -v -run Soxr ./internal/engine | tee soxr-test.log
+          go test -count=1 -v -run 'Soxr|^Test(THD|SNR|PassbandRipple)_AllQualityPresets$' ./internal/engine | tee soxr-test.log
           if grep -q -- '--- SKIP' soxr-test.log; then
             echo "::error::libsoxr comparison tests skipped; check the reference tool build"
             exit 1

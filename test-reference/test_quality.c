@@ -2,7 +2,7 @@
  * Quality measurement tool for soxr reference
  *
  * Measures various audio quality metrics:
- * - Passband ripple (frequency response flatness)
+ * - Passband ripple (gain flatness of 20 tones across the passband)
  * - THD (Total Harmonic Distortion)
  * - SNR (Signal-to-Noise Ratio)
  * - Impulse response characteristics
@@ -11,7 +11,8 @@
  * Usage: ./test_quality <input_rate> <output_rate> <test_type>
  *
  * test_type:
- *   ripple      - Passband ripple measurement
+ *   ripple[:band]  Passband gain flatness of 20 tones up to band times the
+ *                  lower Nyquist (default band 0.9)
  *   thd:1000    - THD at 1000 Hz
  *   snr:1000    - SNR with 1000 Hz test tone
  *   impulse     - Impulse response analysis
@@ -131,28 +132,72 @@ double *resample_soxr(const double *input, size_t input_len,
     return output;
 }
 
-/* Measure passband ripple using multitone test */
-void measure_ripple(double input_rate, double output_rate) {
-    /*
-     * Use multiple test tones across the passband and measure their
-     * level after resampling. This gives us the actual frequency response.
-     */
-    double orig_nyquist = (input_rate < output_rate) ? input_rate / 2.0 : output_rate / 2.0;
-    double passband_end = orig_nyquist * 0.9;
+/*
+ * Level in dB (re an amplitude of 1) of the component at frequency f in y,
+ * sampled at fs. Line-for-line port of ToneLevelDB in
+ * internal/testutil/tone.go; keep the two identical. Windows the middle
+ * segment (at most 16384 samples) with a 4-term Blackman-Harris window and
+ * evaluates a single DFT bin at f. Returns -INFINITY when y is too short.
+ */
+static double tone_level_db(const double *y, size_t len, double fs, double f) {
+    const long max_segment = 16384;
+    const long edge_margin = 1000;
+    long total = (long)len;
+    long n = max_segment;
+    if (total < n + 2 * edge_margin) {
+        n = total - 2 * edge_margin;
+    }
+    if (n < 2) {
+        return -INFINITY;
+    }
+    long start = (total - n) / 2;
+    double re = 0.0, im = 0.0, ws = 0.0;
+    for (long i = 0; i < n; i++) {
+        double x = 2.0 * M_PI * (double)i / (double)(n - 1);
+        double w = 0.35875 - 0.48829 * cos(x) + 0.14128 * cos(2.0 * x) - 0.01168 * cos(3.0 * x);
+        ws += w;
+        double ph = 2.0 * M_PI * f * (double)i / fs;
+        double v = y[start + i] * w;
+        re += v * cos(ph);
+        im -= v * sin(ph);
+    }
+    double amp = 2.0 * hypot(re, im) / ws;
+    return 20.0 * log10(amp + 1e-300);
+}
 
-    /* Generate tones at various frequencies */
-    double test_freqs[20];
-    int num_freqs = 0;
-    for (double f = 500; f < passband_end && num_freqs < 20; f += passband_end / 20.0) {
-        test_freqs[num_freqs++] = f;
+#define RIPPLE_NUM_TONES 20
+#define RIPPLE_LOWEST_HZ 500.0
+#define RIPPLE_TONE_AMP 0.05
+
+/*
+ * Measure passband gain flatness. Must match measurePassbandRipple in
+ * internal/engine/quality_comparison_test.go: 20 equal-amplitude tones from
+ * 500 Hz to band_frac * min(input_rate, output_rate) / 2 (the last one exactly
+ * at the band end), one-shot resample, per-tone gain read with tone_level_db
+ * from the middle of the output and referenced to the input amplitude.
+ * ripple = max gain - min gain. Changing it means regenerating the ripple_*
+ * entries of internal/engine/testdata/soxr_reference_data.json.
+ */
+void measure_ripple(double input_rate, double output_rate, double band_frac) {
+    double orig_nyquist = (input_rate < output_rate) ? input_rate / 2.0 : output_rate / 2.0;
+    double hi = band_frac * orig_nyquist;
+
+    if (!(hi > RIPPLE_LOWEST_HZ)) {
+        fprintf(stderr, "ripple band end %.1f Hz is not above the lowest tone %.0f Hz\n",
+                hi, RIPPLE_LOWEST_HZ);
+        exit(1);
+    }
+
+    double test_freqs[RIPPLE_NUM_TONES];
+    for (int k = 0; k < RIPPLE_NUM_TONES; k++) {
+        test_freqs[k] = RIPPLE_LOWEST_HZ + k * (hi - RIPPLE_LOWEST_HZ) / (RIPPLE_NUM_TONES - 1);
     }
 
     double *input = calloc(QUALITY_SAMPLES, sizeof(double));
-    for (int i = 0; i < num_freqs; i++) {
-        double amp = 0.05;  /* Low amplitude to avoid clipping when summed */
+    for (int i = 0; i < RIPPLE_NUM_TONES; i++) {
         for (size_t s = 0; s < QUALITY_SAMPLES; s++) {
             double phase = 2.0 * M_PI * test_freqs[i] * s / input_rate;
-            input[s] += amp * sin(phase);
+            input[s] += RIPPLE_TONE_AMP * sin(phase);
         }
     }
 
@@ -163,59 +208,35 @@ void measure_ripple(double input_rate, double output_rate) {
 
     if (!output) {
         fprintf(stderr, "Resampling failed\n");
-        return;
+        exit(1);
     }
 
-    /* Compute spectrum of output (with window for spectral leakage control) */
-    size_t num_bins = FFT_SIZE / 2 + 1;
-    double *mag_db = malloc(num_bins * sizeof(double));
-    double *freqs = malloc(num_bins * sizeof(double));
-    compute_spectrum(output, output_len, output_rate, mag_db, freqs, FFT_SIZE);
-    free(output);
-
-    /* Measure level at each test frequency */
-    double levels[20];
-    double sum = 0.0;
-    for (int i = 0; i < num_freqs; i++) {
-        size_t bin = (size_t)(test_freqs[i] / output_rate * FFT_SIZE);
-        /* Find peak in ±2 bins around expected */
-        double peak = -200.0;
-        for (int b = -2; b <= 2; b++) {
-            if (bin + b > 0 && bin + b < num_bins) {
-                if (mag_db[bin + b] > peak) {
-                    peak = mag_db[bin + b];
-                }
-            }
+    double ref_db = 20.0 * log10(RIPPLE_TONE_AMP);
+    double max_gain = -INFINITY;
+    double min_gain = INFINITY;
+    for (int i = 0; i < RIPPLE_NUM_TONES; i++) {
+        double gain = tone_level_db(output, output_len, output_rate, test_freqs[i]) - ref_db;
+        if (!isfinite(gain)) {
+            fprintf(stderr, "tone %.1f Hz has no finite level (output has %zu samples)\n",
+                    test_freqs[i], output_len);
+            free(output);
+            exit(1);
         }
-        levels[i] = peak;
-        sum += peak;
+        if (gain > max_gain) max_gain = gain;
+        if (gain < min_gain) min_gain = gain;
     }
-
-    double avg = sum / num_freqs;
-
-    /* Now measure deviation from average */
-    double max_dev = -1000.0;
-    double min_dev = 1000.0;
-    for (int i = 0; i < num_freqs; i++) {
-        double dev = levels[i] - avg;
-        if (dev > max_dev) max_dev = dev;
-        if (dev < min_dev) min_dev = dev;
-    }
-
-    double ripple = max_dev - min_dev;
+    free(output);
 
     printf("# Passband Ripple Test Results\n");
     printf("# ============================\n");
     printf("# quality = %s\n", get_quality_name());
     printf("# input_rate = %.0f\n", input_rate);
     printf("# output_rate = %.0f\n", output_rate);
-    printf("# test_freqs = %d tones from 500 to %.0f Hz\n", num_freqs, passband_end);
-    printf("# max_deviation = %.6f dB\n", max_dev);
-    printf("# min_deviation = %.6f dB\n", min_dev);
-    printf("# ripple = %.6f dB\n", ripple);
-
-    free(mag_db);
-    free(freqs);
+    printf("# band_fraction = %.6f\n", band_frac);
+    printf("# test_freqs = %d tones from %.0f to %.0f Hz\n", RIPPLE_NUM_TONES, RIPPLE_LOWEST_HZ, hi);
+    printf("# max_deviation = %.6f dB\n", max_gain);
+    printf("# min_deviation = %.6f dB\n", min_gain);
+    printf("# ripple = %.6f dB\n", max_gain - min_gain);
 }
 
 /* Measure THD */
@@ -490,7 +511,7 @@ int main(int argc, char *argv[]) {
     if (argc < 4) {
         fprintf(stderr, "Usage: %s <input_rate> <output_rate> <test_type> [quality]\n", argv[0]);
         fprintf(stderr, "\nTest types:\n");
-        fprintf(stderr, "  ripple       - Passband ripple measurement\n");
+        fprintf(stderr, "  ripple[:band]  Passband gain flatness of 20 tones up to band times the lower Nyquist (default 0.9)\n");
         fprintf(stderr, "  thd:1000     - THD at 1000 Hz\n");
         fprintf(stderr, "  snr:1000     - SNR with 1000 Hz tone\n");
         fprintf(stderr, "  impulse      - Impulse response analysis\n");
@@ -514,7 +535,15 @@ int main(int argc, char *argv[]) {
     }
 
     if (strcmp(test_type, "ripple") == 0) {
-        measure_ripple(input_rate, output_rate);
+        measure_ripple(input_rate, output_rate, 0.9);
+    } else if (strncmp(test_type, "ripple:", 7) == 0) {
+        char *end = NULL;
+        double band = strtod(test_type + 7, &end);
+        if (end == test_type + 7 || *end != '\0' || !(band > 0.0 && band <= 1.0)) {
+            fprintf(stderr, "Invalid ripple band: %s (want a fraction in (0, 1])\n", test_type + 7);
+            return 1;
+        }
+        measure_ripple(input_rate, output_rate, band);
     } else if (strncmp(test_type, "thd:", 4) == 0) {
         double test_freq = atof(test_type + 4);
         measure_thd(input_rate, output_rate, test_freq);
