@@ -454,3 +454,23 @@ func TestSoxrCompareHelpers_RejectBadOutput(t *testing.T) {
 		sineLag(got, want, 1000, 48000, soxrWindowStart, soxrWindowLen)
 	})
 }
+
+// TestSoxrComparison_PresetRecipes pins which presets are compared and which
+// libsoxr recipe each is compared with. The tolerances cannot tell the High
+// and VeryHigh recipes apart, so a swapped pair in qualityPresets would
+// otherwise pass.
+func TestSoxrComparison_PresetRecipes(t *testing.T) {
+	want := map[Quality]string{
+		QualityHigh:     "high",
+		QualityVeryHigh: "veryhigh",
+	}
+
+	if len(soxrWaveformPresets) != len(want) {
+		t.Fatalf("%d presets compared, want %d", len(soxrWaveformPresets), len(want))
+	}
+	for _, p := range soxrWaveformPresets {
+		if got := p.soxrQuality; got != want[p.goQuality] {
+			t.Errorf("preset %s (Go quality %v) is compared with libsoxr recipe %q, want %q", p.name, p.goQuality, got, want[p.goQuality])
+		}
+	}
+}
